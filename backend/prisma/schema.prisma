@@ -1,0 +1,263 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+/// Defines the role of a user within the LEO ecosystem.
+enum Role {
+  CREATOR
+  CONSUMER
+  OPERATOR
+  ADMIN
+  RESEARCHER
+  DEVELOPER
+}
+
+/// Tracks the lifecycle of a cognitive workflow execution.
+enum SessionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  DISPUTED
+}
+
+/// Tracks the lifecycle of an individual AI agent node execution.
+enum NodeStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+/// Represents the state of a USDC nanopayment on Arc L1.
+enum PaymentStatus {
+  PENDING
+  LOCKED
+  RELEASED
+  REFUNDED
+  DISPUTED
+}
+
+/// Defines types of auth tokens
+enum TokenType {
+  REFRESH
+  RESET_PASSWORD
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+/// The core identity of a participant on the platform.
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  password        String
+  did             String?           @unique // Decentralized Identifier tied to on-chain identity
+  displayName     String?
+  role            Role              @default(CONSUMER)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  wallets         Wallet[]
+  apiKeys         APIKey[]
+  researchSessions ResearchSession[]
+  tokens          Token[]
+
+  @@index([email])
+  @@index([did])
+}
+
+/// A blockchain wallet belonging to a User, used for Arc L1 payments and signatures.
+model Wallet {
+  id              String            @id @default(uuid())
+  userId          String
+  address         String            @unique
+  chain           String            @default("arc")
+  createdAt       DateTime          @default(now())
+  
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentsPayer   Payment[]         @relation("PayerWallet")
+  paymentsPayee   Payment[]         @relation("PayeeWallet")
+  transactions    Transaction[]
+
+  @@index([userId])
+  @@index([address])
+}
+
+/// Stores authentication tokens
+model Token {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  type        TokenType
+  expires     DateTime
+  blacklisted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+/// API Keys for programmatic access by developers or agent operators.
+model APIKey {
+  id              String            @id @default(uuid())
+  userId          String
+  keyHash         String            @unique // Hashed key for security; raw key never stored
+  name            String
+  expiresAt       DateTime?
+  createdAt       DateTime          @default(now())
+  
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Represents an active or completed execution of a cognitive workflow.
+model ResearchSession {
+  id              String            @id @default(uuid())
+  userId          String            // The Consumer who initiated the workflow
+  workflowId      String            // Hash/ID of the workflow blueprint on IPFS
+  status          SessionStatus     @default(PENDING)
+  totalCost       Decimal           @default(0.0) @db.Decimal(18, 6) // Supports USDC nanopayments precision
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflowNodes   WorkflowNode[]
+  payments        Payment[]
+  verificationLogs VerificationLog[]
+  merkleRoot      MerkleRoot?
+
+  @@index([userId])
+  @@index([status])
+}
+
+/// An individual step (e.g., an LLM call or tool execution) within a ResearchSession.
+model WorkflowNode {
+  id              String            @id @default(uuid())
+  sessionId       String
+  stepIndex       Int
+  agentDid        String            // The DID of the specific AI Agent handling this node
+  status          NodeStatus        @default(QUEUED)
+  startTime       DateTime?
+  endTime         DateTime?
+  createdAt       DateTime          @default(now())
+  
+  session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  hashes          Hash[]
+  blockchainReceipt BlockchainReceipt?
+  
+  @@unique([sessionId, stepIndex])
+  @@index([sessionId])
+}
+
+/// Cryptographic hashes of inputs, outputs, or state for a WorkflowNode.
+/// Storing only the hash ensures data privacy while maintaining tamper-evidence.
+model Hash {
+  id              String            @id @default(uuid())
+  nodeId          String
+  type            String            // e.g., 'INPUT', 'OUTPUT', 'STATE'
+  hashValue       String
+  createdAt       DateTime          @default(now())
+  
+  node            WorkflowNode      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+}
+
+/// The aggregated cryptographic root of all Hashes in a ResearchSession.
+model MerkleRoot {
+  id              String            @id @default(uuid())
+  sessionId       String            @unique
+  rootHash        String            @unique
+  createdAt       DateTime          @default(now())
+  
+  session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  blockchainReceipt BlockchainReceipt?
+
+  @@index([rootHash])
+}
+
+/// An on-chain proof (receipt) anchored to Arc L1. 
+/// Can be tied to a single step (WorkflowNode) or the entire workflow (MerkleRoot).
+model BlockchainReceipt {
+  id              String            @id @default(uuid())
+  nodeId          String?           @unique
+  merkleRootId    String?           @unique
+  signature       String            // The operator's cryptographic signature confirming execution
+  createdAt       DateTime          @default(now())
+  
+  node            WorkflowNode?     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  merkleRoot      MerkleRoot?       @relation(fields: [merkleRootId], references: [id], onDelete: Cascade)
+  transaction     Transaction?
+  
+  @@index([nodeId])
+  @@index([merkleRootId])
+}
+
+/// Tracks the lifecycle of USDC nanopayments in the Escrow Vault.
+model Payment {
+  id              String            @id @default(uuid())
+  sessionId       String
+  payerWalletId   String
+  payeeWalletId   String
+  amountUsdc      Decimal           @db.Decimal(18, 6)
+  status          PaymentStatus     @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  payer           Wallet            @relation("PayerWallet", fields: [payerWalletId], references: [id])
+  payee           Wallet            @relation("PayeeWallet", fields: [payeeWalletId], references: [id])
+  transaction     Transaction?
+
+  @@index([sessionId])
+  @@index([payerWalletId])
+  @@index([payeeWalletId])
+  @@index([status])
+}
+
+/// Represents a raw blockchain transaction on the Arc network.
+model Transaction {
+  id              String            @id @default(uuid())
+  txHash          String            @unique
+  walletId        String?
+  paymentId       String?           @unique
+  receiptId       String?           @unique
+  chain           String            @default("arc")
+  status          String            @default("CONFIRMED")
+  createdAt       DateTime          @default(now())
+  
+  wallet          Wallet?           @relation(fields: [walletId], references: [id])
+  payment         Payment?          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  receipt         BlockchainReceipt? @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([txHash])
+  @@index([walletId])
+}
+
+/// An audit trail logging every time a cryptographic proof is verified by a third party.
+model VerificationLog {
+  id              String            @id @default(uuid())
+  sessionId       String
+  verifierIp      String?
+  isValid         Boolean
+  verifiedAt      DateTime          @default(now())
+  
+  session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}

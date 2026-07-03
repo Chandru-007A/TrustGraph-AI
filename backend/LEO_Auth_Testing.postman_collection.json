@@ -1,0 +1,277 @@
+{
+  "info": {
+    "name": "LEO Auth Module — Production Testing",
+    "_postman_id": "leo-auth-2026",
+    "description": "Complete authentication flow testing for LEO backend. Run in order.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "BASE_URL", "value": "http://localhost:5000/api/v1" },
+    { "key": "ACCESS_TOKEN", "value": "" },
+    { "key": "REFRESH_TOKEN", "value": "" },
+    { "key": "RESET_TOKEN", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "🏥 Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{BASE_URL}}/health", "host": ["{{BASE_URL}}"], "path": ["health"] }
+      }
+    },
+    {
+      "name": "📝 Register — Success",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status 201', () => pm.response.to.have.status(201));",
+              "pm.test('Has access token', () => pm.expect(res.data.tokens.access.token).to.be.a('string'));",
+              "pm.collectionVariables.set('ACCESS_TOKEN', res.data.tokens.access.token);",
+              "pm.collectionVariables.set('REFRESH_TOKEN', res.data.tokens.refresh.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@leo.dev\",\n  \"password\": \"Test@1234!\",\n  \"displayName\": \"Test User\",\n  \"role\": \"RESEARCHER\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/register", "host": ["{{BASE_URL}}"], "path": ["auth", "register"] }
+      }
+    },
+    {
+      "name": "📝 Register — Duplicate Email (409)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@leo.dev\",\n  \"password\": \"Test@1234!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/register", "host": ["{{BASE_URL}}"], "path": ["auth", "register"] }
+      }
+    },
+    {
+      "name": "📝 Register — Weak Password (400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test2@leo.dev\",\n  \"password\": \"weakpass\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/register", "host": ["{{BASE_URL}}"], "path": ["auth", "register"] }
+      }
+    },
+    {
+      "name": "📝 Register — Self-assign ADMIN (400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"admin@leo.dev\",\n  \"password\": \"Admin@1234!\",\n  \"role\": \"ADMIN\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/register", "host": ["{{BASE_URL}}"], "path": ["auth", "register"] }
+      }
+    },
+    {
+      "name": "🔑 Login — Success",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Has tokens', () => pm.expect(res.data.tokens).to.exist);",
+              "pm.collectionVariables.set('ACCESS_TOKEN', res.data.tokens.access.token);",
+              "pm.collectionVariables.set('REFRESH_TOKEN', res.data.tokens.refresh.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@leo.dev\",\n  \"password\": \"Test@1234!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/login", "host": ["{{BASE_URL}}"], "path": ["auth", "login"] }
+      }
+    },
+    {
+      "name": "🔑 Login — Wrong Password (401)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@leo.dev\",\n  \"password\": \"WrongPass!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/login", "host": ["{{BASE_URL}}"], "path": ["auth", "login"] }
+      }
+    },
+    {
+      "name": "👤 Get Current User (me)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.test('No password in response', () => pm.expect(res.data.password).to.be.undefined);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }],
+        "url": { "raw": "{{BASE_URL}}/auth/me", "host": ["{{BASE_URL}}"], "path": ["auth", "me"] }
+      }
+    },
+    {
+      "name": "👤 Get Me — No Token (401)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{BASE_URL}}/auth/me", "host": ["{{BASE_URL}}"], "path": ["auth", "me"] }
+      }
+    },
+    {
+      "name": "🔄 Refresh Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.collectionVariables.set('ACCESS_TOKEN', res.data.tokens.access.token);",
+              "pm.collectionVariables.set('REFRESH_TOKEN', res.data.tokens.refresh.token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{REFRESH_TOKEN}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/refresh", "host": ["{{BASE_URL}}"], "path": ["auth", "refresh"] }
+      }
+    },
+    {
+      "name": "🔒 Change Password",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"oldPassword\": \"Test@1234!\",\n  \"newPassword\": \"NewPass@5678!\",\n  \"confirmPassword\": \"NewPass@5678!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/change-password", "host": ["{{BASE_URL}}"], "path": ["auth", "change-password"] }
+      }
+    },
+    {
+      "name": "🔒 Change Password — Mismatch (400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"oldPassword\": \"Test@1234!\",\n  \"newPassword\": \"NewPass@5678!\",\n  \"confirmPassword\": \"DifferentPass!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/change-password", "host": ["{{BASE_URL}}"], "path": ["auth", "change-password"] }
+      }
+    },
+    {
+      "name": "📧 Forgot Password",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "if(res.data && res.data.resetToken) {",
+              "  pm.collectionVariables.set('RESET_TOKEN', res.data.resetToken);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@leo.dev\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/forgot-password", "host": ["{{BASE_URL}}"], "path": ["auth", "forgot-password"] }
+      }
+    },
+    {
+      "name": "📧 Forgot Password — Non-existent Email (200, no enumeration)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"nobody@nowhere.com\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/forgot-password", "host": ["{{BASE_URL}}"], "path": ["auth", "forgot-password"] }
+      }
+    },
+    {
+      "name": "🔓 Reset Password",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"token\": \"{{RESET_TOKEN}}\",\n  \"newPassword\": \"Reset@9999!\",\n  \"confirmPassword\": \"Reset@9999!\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/reset-password", "host": ["{{BASE_URL}}"], "path": ["auth", "reset-password"] }
+      }
+    },
+    {
+      "name": "🚪 Logout",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{REFRESH_TOKEN}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/auth/logout", "host": ["{{BASE_URL}}"], "path": ["auth", "logout"] }
+      }
+    },
+    {
+      "name": "🚪 Use Token After Logout (401)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }],
+        "url": { "raw": "{{BASE_URL}}/auth/me", "host": ["{{BASE_URL}}"], "path": ["auth", "me"] }
+      }
+    }
+  ]
+}
