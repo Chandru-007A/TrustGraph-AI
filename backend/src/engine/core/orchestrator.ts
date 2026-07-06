@@ -169,7 +169,7 @@ export class WorkflowOrchestrator {
       answer: criticalFailure
         ? `Workflow failed: ${criticalFailureMessage}`
         : evidenceOutput?.finalAnswer ?? 'Research completed.',
-      sources: sourceOutput?.sources.map((s) => s.url) ?? [],
+      sources: sourceOutput?.sources?.map((s) => s.url) ?? [],
       confidence: evidenceOutput?.confidence ?? 0,
       evidenceSummary: evidenceOutput?.evidenceSummary ?? '',
       merkleRootHash: merkleOutput?.rootHash,

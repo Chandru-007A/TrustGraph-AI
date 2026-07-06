@@ -63,24 +63,28 @@ export default function DagPage() {
   // ── Live session detail (polled) ────────────────────────────────────
   const sessionQuery = useWorkflowProgress(sessionId);
   const session = sessionQuery.data;
-  const workflowId = session?.workflowId;
+  // The /workflow/:id/graph-json route validates :id as a UUID against
+  // ResearchSession.id, so we must pass the session's UUID — not its
+  // blueprint `workflowId` (which is an IPFS hash). See workflow.service
+  // `getReactFlowDag` for the matching lookup.
+  const sessionIdFromSession = session?.id;
 
   // ── Graph layout (positions + edges) ────────────────────────────────
   // Pulled once and refreshed on demand. We don't poll this separately
   // because the node positions are static — the live data is the
   // status, times, and hash, which all live in the session detail.
   const graphQuery = useQuery({
-    queryKey: ['workflow', 'dag', workflowId, 'graph-json'],
+    queryKey: ['workflow', 'dag', sessionIdFromSession, 'graph-json'],
     queryFn: async (): Promise<GraphJson> => {
       const res = await apiClient.get<ApiResponse<GraphJson>>(
-        `/workflow/${workflowId}/graph-json`,
+        `/workflow/${sessionIdFromSession}/graph-json`,
       );
       if (!res.data.data) {
         throw new Error('Invalid server response');
       }
       return res.data.data;
     },
-    enabled: !!workflowId,
+    enabled: !!sessionIdFromSession,
     staleTime: 30_000,
   });
 
@@ -144,7 +148,7 @@ export default function DagPage() {
         ) : session ? (
           <div className="space-y-6">
             <SummaryGrid
-              workflowId={session.workflowId}
+              workflowId={sessionIdFromSession ?? ''}
               sessionId={session.id}
               merkleRootHash={session.merkleRoot?.merkleRootHash ?? null}
               nodeCount={session.workflowNodes.length}
