@@ -12,6 +12,13 @@ export interface TokenPayload {
   type: 'ACCESS' | 'REFRESH' | 'RESET_PASSWORD';
 }
 
+export interface UserWallet {
+  id: string;
+  address: string;
+  chain: string;
+  createdAt: Date;
+}
+
 /** Returned from generateAuthTokens — both tokens with their expiry dates. */
 export interface AuthTokens {
   access: {
@@ -33,6 +40,8 @@ export interface SafeUser {
   role: Role;
   createdAt: Date;
   updatedAt: Date;
+  /** Wallets attached to the user. Always present; empty array if none. */
+  wallets: UserWallet[];
 }
 
 /** Body of a successful login/register response. */

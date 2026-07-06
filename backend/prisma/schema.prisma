@@ -54,6 +54,22 @@ enum TokenType {
   RESET_PASSWORD
 }
 
+/// Defines what type of cryptographic verification was performed
+enum VerificationType {
+  NODE_HASH
+  MERKLE_PROOF
+  WORKFLOW_INTEGRITY
+}
+
+/// Lifecycle of a Circle Gateway Unified Balance operation.
+enum GatewayTxStatus {
+  PENDING        // Spend or deposit has been requested but no txHash yet
+  BROADCAST      // Tx sent to source/destination chain
+  CONFIRMED      // Gateway attestation succeeded and final balance updated
+  FAILED         // Validation / attestation / on-chain revert
+  EXPIRED        // Gateway attestation expired before mint
+}
+
 // ==========================================
 // MODELS
 // ==========================================
@@ -84,8 +100,15 @@ model Wallet {
   userId          String
   address         String            @unique
   chain           String            @default("arc")
+  /// Last connected wallet connector: "metaMask" | "coinbaseWallet" | "walletConnect" | null.
+  /// Set by the frontend on every successful connect. Used for analytics and
+  /// for re-selecting the same connector on the next session.
+  connector       String?
+  /// Wall-clock time of the most recent connect, refreshed every time the
+  /// user links this wallet. Distinct from `createdAt` (first-seen row).
+  connectedAt     DateTime?
   createdAt       DateTime          @default(now())
-  
+
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   paymentsPayer   Payment[]         @relation("PayerWallet")
   paymentsPayee   Payment[]         @relation("PayeeWallet")
@@ -150,17 +173,21 @@ model WorkflowNode {
   id              String            @id @default(uuid())
   sessionId       String
   stepIndex       Int
+  nodeName        String            @default("UnknownNode")
   agentDid        String            // The DID of the specific AI Agent handling this node
   status          NodeStatus        @default(QUEUED)
   startTime       DateTime?
   endTime         DateTime?
   createdAt       DateTime          @default(now())
   
+  // DAG Relationships (Adjacency List)
+  parentNodeIds   String[]          @default([])
+  childNodeIds    String[]          @default([])
+  
   session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   hashes          Hash[]
   blockchainReceipt BlockchainReceipt?
   
-  @@unique([sessionId, stepIndex])
   @@index([sessionId])
 }
 
@@ -179,33 +206,123 @@ model Hash {
 }
 
 /// The aggregated cryptographic root of all Hashes in a ResearchSession.
+/// Extended to carry the full tree metadata required for proof generation.
 model MerkleRoot {
   id              String            @id @default(uuid())
   sessionId       String            @unique
   rootHash        String            @unique
+  leafCount       Int               @default(0)   // Number of leaf hashes in the tree
+  treeDepth       Int               @default(0)   // Height of the binary tree
+  algorithm       String            @default("SHA-256")
+  generationMs    Int               @default(0)   // How long it took to build the tree (ms)
+  leaves          String[]          @default([])  // Ordered leaf hashes (for proof re-computation)
   createdAt       DateTime          @default(now())
   
   session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   blockchainReceipt BlockchainReceipt?
+  proofs          MerkleProof[]
 
   @@index([rootHash])
+  @@index([sessionId])
+}
+
+/// A Merkle Proof for a single leaf node — the sibling path from leaf to root.
+/// Stored so any party can independently verify a node without seeing other nodes.
+model MerkleProof {
+  id              String            @id @default(uuid())
+  merkleRootId    String
+  nodeId          String            // The WorkflowNode this proof belongs to
+  leafHash        String            // The leaf hash being proven
+  proof           Json              // Array of { hash, position: 'LEFT'|'RIGHT' }
+  proofDepth      Int               // Number of sibling hashes in the proof path
+  isValid         Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+
+  merkleRoot      MerkleRoot        @relation(fields: [merkleRootId], references: [id], onDelete: Cascade)
+
+  @@index([merkleRootId])
+  @@index([nodeId])
+  @@index([leafHash])
 }
 
 /// An on-chain proof (receipt) anchored to Arc L1. 
 /// Can be tied to a single step (WorkflowNode) or the entire workflow (MerkleRoot).
 model BlockchainReceipt {
-  id              String            @id @default(uuid())
-  nodeId          String?           @unique
-  merkleRootId    String?           @unique
-  signature       String            // The operator's cryptographic signature confirming execution
-  createdAt       DateTime          @default(now())
+  id                 String            @id @default(uuid())
+  nodeId             String?           @unique
+  merkleRootId       String?           @unique
+  signature          String            // The operator's cryptographic signature / txHash confirming execution
+  contractAddress    String?           // The smart contract used (ReceiptRegistryV2 address)
+  registrationStatus String            @default("PENDING") // PENDING, REGISTERED, FAILED
+
+  // ReceiptRegistryV2 publishV2() parameters — populated after successful publish
+  onChainReceiptId   String?           // The uint256 id returned by publishV2 / emitted in ReceiptV2 event
+  traceHash          String?           // bytes32: keccak256 of all workflow node hash values
+  traceCid           String?           // IPFS CID of the full trace
+  marketId           String?           // bytes32: keccak256(sessionId) — session-scoped market identifier
+  probability        Int?              // uint32: 0–10000 (PROBABILITY_SCALE). Derived from node completion ratio.
+  confidence         Int?              // uint32: 0–10000. Derived from AI validation confidence.
+  schemaVersion      String?           // bytes16 hex: "LEO_RECEIPT_V1" padded to 16 bytes
+  publishedAt        DateTime?         // On-chain block timestamp of the publishedAt field
+
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
   
-  node            WorkflowNode?     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  merkleRoot      MerkleRoot?       @relation(fields: [merkleRootId], references: [id], onDelete: Cascade)
-  transaction     Transaction?
+  node               WorkflowNode?     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  merkleRoot         MerkleRoot?       @relation(fields: [merkleRootId], references: [id], onDelete: Cascade)
+  transaction        Transaction?
+  events             ContractEvent[]
+  receiptV2Events    ReceiptV2Event[]
   
   @@index([nodeId])
   @@index([merkleRootId])
+  @@index([registrationStatus])
+  @@index([onChainReceiptId])
+}
+
+/// A log of events emitted by the smart contracts.
+model ContractEvent {
+  id              String            @id @default(uuid())
+  receiptId       String
+  eventName       String            // e.g., 'ReceiptRegistered', 'ReceiptVerified'
+  txHash          String?
+  blockNumber     Int?
+  eventData       Json              // Store event payload
+  createdAt       DateTime          @default(now())
+
+  receipt         BlockchainReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@index([eventName])
+}
+
+/// Stores every field emitted by the ReceiptV2 on-chain event.
+/// Populated in real-time by the arc.worker event listener.
+model ReceiptV2Event {
+  id              String            @id @default(uuid())
+  receiptId       String            // FK to BlockchainReceipt
+  onChainId       String            // uint256 id from ReceiptV2 event
+  publisher       String            // operator address (indexed in event)
+  consumer        String            // consumer address (indexed in event)
+  marketId        String            // bytes32 market identifier
+  probability     Int               // uint32, 0–10000
+  confidence      Int               // uint32, 0–10000
+  traceHash       String            // bytes32 keccak of trace
+  merkleRoot      String            // bytes32 anchored Merkle root
+  schemaVersion   String            // bytes16 as hex string
+  traceCid        String            // IPFS CID of trace
+  publishedAt     DateTime          // decoded from uint64 unix timestamp
+  txHash          String?           // transaction hash of the emitting tx
+  blockNumber     Int?              // block number of the emitting tx
+  createdAt       DateTime          @default(now())
+
+  receipt         BlockchainReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId])
+  @@index([onChainId])
+  @@index([publisher])
+  @@index([consumer])
+  @@index([marketId])
 }
 
 /// Tracks the lifecycle of USDC nanopayments in the Escrow Vault.
@@ -233,12 +350,16 @@ model Payment {
 /// Represents a raw blockchain transaction on the Arc network.
 model Transaction {
   id              String            @id @default(uuid())
-  txHash          String            @unique
+  txHash          String?           @unique
   walletId        String?
   paymentId       String?           @unique
   receiptId       String?           @unique
   chain           String            @default("arc")
-  status          String            @default("CONFIRMED")
+  status          String            @default("PENDING") // PENDING, CONFIRMED, FAILED
+  blockNumber     Int?
+  explorerUrl     String?
+  retryCount      Int               @default(0)
+  lastError       String?
   createdAt       DateTime          @default(now())
   
   wallet          Wallet?           @relation(fields: [walletId], references: [id])
@@ -247,17 +368,107 @@ model Transaction {
 
   @@index([txHash])
   @@index([walletId])
+  @@index([status])
 }
 
 /// An audit trail logging every time a cryptographic proof is verified by a third party.
 model VerificationLog {
-  id              String            @id @default(uuid())
-  sessionId       String
-  verifierIp      String?
-  isValid         Boolean
-  verifiedAt      DateTime          @default(now())
+  id               String            @id @default(uuid())
+  sessionId        String
+  verificationType VerificationType
+  verifierId       String?           // E.g., IP address, or user ID performing the verification
+  isValid          Boolean
+  result           Json              // Full report or exact discrepancy data
+  durationMs       Int               @default(0)
+  verifiedAt       DateTime          @default(now())
   
-  session         ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session          ResearchSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
+  @@index([verificationType])
+}
+
+/// Represents the payment entitlement state under Coinbase x402 protocol.
+model PaymentEntitlement {
+  id                   String    @id @default(uuid())
+  workflowId           String
+  nodeId               String
+  walletAddress        String
+  paymentReference     String    @unique
+  amount               Decimal   @db.Decimal(18, 6)
+  currency             String
+  paymentStatus        String    // UNPAID, PENDING, PAID, FAILED, EXPIRED, REFUNDED
+  paidAt               DateTime?
+  expiresAt            DateTime?
+  facilitatorReference String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([walletAddress, workflowId, nodeId])
+  @@index([paymentReference])
+}
+
+/// Audit log of every Circle Gateway Unified Balance operation triggered
+/// by LEO. One row per logical operation (deposit, spend, balance refresh,
+/// or webhook event). The `operation` field distinguishes the row type so a
+/// single table can serve as the unified history view required by
+/// `GET /api/v1/gateway/transactions`.
+model GatewayTransaction {
+  id                 String           @id @default(uuid())
+
+  // What kind of operation this row represents
+  //   DEPOSIT   — money moved into the Unified Balance
+  //   SPEND     — money was pulled from Unified Balance and minted on a chain
+  //   BALANCE   — periodic balance snapshot (no on-chain side-effect)
+  //   WEBHOOK   — async event received from Circle (Deposit Completed, etc.)
+  operation          String
+
+  // x402 linkage — present for SPEND rows that settle an x402 challenge.
+  // Foreign key intentionally left as a plain String (not @relation) so
+  // GatewayTransaction can outlive a deleted entitlement for audit purposes.
+  workflowId         String?
+  nodeId             String?
+  paymentReference   String?          // x402 PaymentEntitlement.paymentReference
+  paymentEntitlementId String?
+
+  // Gateway identifier returned by the AppKit (mint txHash, deposit txHash,
+  // Gateway transferId, or webhook event_id for duplicate-prevention).
+  transactionHash    String?
+  gatewayTransferId  String?
+  gatewayEventId     String?          // Webhook idempotency key
+  webhookEventType   String?          // deposit.completed | spend.completed | transfer.failed | balance.updated
+
+  // Wallet + amount context
+  walletAddress      String
+  amount             Decimal          @db.Decimal(18, 6) // USDC atomic precision
+  token              String           @default("USDC")
+
+  // Chain + network
+  sourceChain        String?
+  destinationChain   String?
+  network            String           @default("eip155:5042002") // Arc Testnet
+
+  // Lifecycle
+  status             GatewayTxStatus  @default(PENDING)
+  errorMessage       String?
+  feeAmount          Decimal?         @db.Decimal(18, 6)
+  feeToken           String?
+
+  // Explorer + audit
+  explorerUrl        String?
+  initiatedBy        String?          // userId of the operator that triggered it
+  metadata           Json?            // Raw Gateway payload for forensics
+
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  confirmedAt        DateTime?
+
+  @@index([operation])
+  @@index([status])
+  @@index([walletAddress])
+  @@index([workflowId, nodeId])
+  @@index([paymentReference])
+  @@index([gatewayEventId])
+  @@index([transactionHash])
+  @@index([createdAt])
 }

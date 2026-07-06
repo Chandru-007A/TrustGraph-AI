@@ -1,0 +1,576 @@
+{
+  "info": {
+    "name": "LEO Workflow Engine — Testing",
+    "_postman_id": "leo-workflow-2026",
+    "description": "API Tests for the AI Workflow Engine.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "BASE_URL", "value": "http://localhost:5000/api/v1" },
+    { "key": "ACCESS_TOKEN", "value": "" },
+    { "key": "SESSION_ID", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "⚙️ 1. Start Workflow",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "if (res.data && res.data.sessionId) {",
+              "  pm.collectionVariables.set('SESSION_ID', res.data.sessionId);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"What are the long-term cognitive effects of asynchronous remote work on software developers?\",\n  \"context\": { \"priority\": \"high\" }\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/workflow/start", "host": ["{{BASE_URL}}"], "path": ["workflow", "start"] }
+      }
+    },
+    {
+      "name": "⚙️ 2. Get My Sessions (Paginated)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/sessions?page=1&limit=10", "host": ["{{BASE_URL}}"], "path": ["workflow", "sessions"], "query": [
+          { "key": "page", "value": "1" },
+          { "key": "limit", "value": "10" }
+        ] }
+      }
+    },
+    {
+      "name": "⚙️ 3. Get Session Details",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/sessions/{{SESSION_ID}}", "host": ["{{BASE_URL}}"], "path": ["workflow", "sessions", "{{SESSION_ID}}"] }
+      }
+    },
+    {
+      "name": "⚙️ 4. Build DAG",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/build-dag", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "build-dag"] }
+      }
+    },
+    {
+      "name": "⚙️ 5. Get DAG (JSON)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/dag", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "dag"] }
+      }
+    },
+    {
+      "name": "⚙️ 6. Get DAG (React Flow)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/graph-json", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "graph-json"] }
+      }
+    },
+    {
+      "name": "🔐 7. Hash Session Nodes (Batch SHA-256)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200 or 207', () => pm.expect(pm.response.code).to.be.oneOf([200, 207]));",
+              "pm.test('Has hash records', () => pm.expect(res.data.hashes).to.be.an('array'));",
+              "if (res.data.hashes && res.data.hashes.length > 0) {",
+              "  pm.collectionVariables.set('FIRST_HASH_VALUE', res.data.hashes[0].hashValue);",
+              "  pm.collectionVariables.set('FIRST_NODE_ID', res.data.hashes[0].nodeId);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/hash", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "hash"] }
+      }
+    },
+    {
+      "name": "🔐 8. Get Session Hashes",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/hashes", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "hashes"] }
+      }
+    },
+    {
+      "name": "🔐 9. Verify Hash — Valid (should pass)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Hash is valid', () => pm.expect(res.data.isValid).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nodeId\": \"{{FIRST_NODE_ID}}\",\n  \"expectedHash\": \"{{FIRST_HASH_VALUE}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/workflow/hash/verify", "host": ["{{BASE_URL}}"], "path": ["workflow", "hash", "verify"] }
+      }
+    },
+    {
+      "name": "🔐 10. Verify Hash — Tampered (should FAIL)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Hash is invalid (tampered hash detected)', () => pm.expect(res.data.isValid).to.be.false);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nodeId\": \"{{FIRST_NODE_ID}}\",\n  \"expectedHash\": \"0000000000000000000000000000000000000000000000000000000000000000\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/workflow/hash/verify", "host": ["{{BASE_URL}}"], "path": ["workflow", "hash", "verify"] }
+    },
+    {
+      "name": "🌲 11. Build Merkle Tree",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+              "if (res.data && res.data.rootHash) {",
+              "  pm.collectionVariables.set('MERKLE_ROOT_HASH', res.data.rootHash);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/merkle", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "merkle"] }
+      }
+    },
+    {
+      "name": "🌲 12. Get Merkle Tree",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/merkle", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "merkle"] }
+      }
+    },
+    {
+      "name": "🌲 13. Generate Merkle Proof",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "if (res.data && res.data.proof) {",
+              "  pm.collectionVariables.set('MERKLE_PROOF_JSON', JSON.stringify(res.data.proof));",
+              "  pm.collectionVariables.set('MERKLE_PROOF_LEAF_HASH', res.data.leafHash);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nodeId\": \"{{FIRST_NODE_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/workflow/{{SESSION_ID}}/proof", "host": ["{{BASE_URL}}"], "path": ["workflow", "{{SESSION_ID}}", "proof"] }
+      }
+    },
+    {
+      "name": "🌲 14. Verify Merkle Proof",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Proof is valid', () => pm.expect(res.data.isValid).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"leafHash\": \"{{MERKLE_PROOF_LEAF_HASH}}\",\n  \"rootHash\": \"{{MERKLE_ROOT_HASH}}\",\n  \"proof\": {{MERKLE_PROOF_JSON}}\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/workflow/verify-proof", "host": ["{{BASE_URL}}"], "path": ["workflow", "verify-proof"] }
+      }
+    },
+    {
+      "name": "🛡️ 15. Verify Node Hash",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Node is valid', () => pm.expect(pm.response.json().data.isValid).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nodeId\": \"{{FIRST_NODE_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/verify/node", "host": ["{{BASE_URL}}"], "path": ["verify", "node"] }
+      }
+    },
+    {
+      "name": "🛡️ 16. Verify Merkle Proof (Engine)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Proof is valid', () => pm.expect(pm.response.json().data.isValid).to.be.true);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"leafHash\": \"{{MERKLE_PROOF_LEAF_HASH}}\",\n  \"rootHash\": \"{{MERKLE_ROOT_HASH}}\",\n  \"proof\": {{MERKLE_PROOF_JSON}}\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/verify/proof", "host": ["{{BASE_URL}}"], "path": ["verify", "proof"] }
+      }
+    },
+    {
+      "name": "🛡️ 17. Verify Workflow Integrity",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Integrity Score is 100', () => pm.expect(pm.response.json().data.integrityScore).to.equal(100));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"{{SESSION_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/verify/workflow", "host": ["{{BASE_URL}}"], "path": ["verify", "workflow"] }
+      }
+    },
+    {
+      "name": "🛡️ 18. Get Verification Report",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/verify/report/WF-MARKET-001", "host": ["{{BASE_URL}}"], "path": ["verify", "report", "WF-MARKET-001"] }
+      }
+    },
+    {
+      "name": "🚨 19. DEMO: Tamper Node Data",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nodeId\": \"{{FIRST_NODE_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/verify/tamper", "host": ["{{BASE_URL}}"], "path": ["verify", "tamper"] }
+      }
+    },
+    {
+      "name": "🚨 20. Verify Workflow Integrity (Fails after tamper)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Integrity is TAMPERED', () => pm.expect(pm.response.json().data.overallResult).to.equal('TAMPERED'));",
+              "pm.test('Score is below 100', () => pm.expect(pm.response.json().data.integrityScore).to.be.below(100));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"{{SESSION_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/verify/workflow", "host": ["{{BASE_URL}}"], "path": ["verify", "workflow"] }
+      }
+    },
+    {
+      "name": "🔗 21. Anchor Merkle Root to Arc",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Transaction Hash returned', () => pm.expect(pm.response.json().data.txHash).to.exist);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"{{SESSION_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/blockchain/anchor", "host": ["{{BASE_URL}}"], "path": ["blockchain", "anchor"] }
+      }
+    },
+    {
+      "name": "🔗 22. Get Blockchain Receipt",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/blockchain/receipt/{{SESSION_ID}}", "host": ["{{BASE_URL}}"], "path": ["blockchain", "receipt", "{{SESSION_ID}}"] }
+      }
+    },
+    {
+      "name": "🔗 23. Get Transaction Status",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/blockchain/status/{{TX_HASH}}", "host": ["{{BASE_URL}}"], "path": ["blockchain", "status", "{{TX_HASH}}"] }
+      }
+    },
+    {
+      "name": "🔗 24. Retry Failed Transaction",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"transactionHash\": \"{{TX_HASH}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/blockchain/retry", "host": ["{{BASE_URL}}"], "path": ["blockchain", "retry"] }
+      }
+    },
+    {
+      "name": "🔗 25. Register Merkle Root",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"workflowId\": \"{{SESSION_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/receipt/register", "host": ["{{BASE_URL}}"], "path": ["receipt", "register"] }
+      }
+    },
+    {
+      "name": "🔗 26. Get Receipt",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/receipt/{{SESSION_ID}}", "host": ["{{BASE_URL}}"], "path": ["receipt", "{{SESSION_ID}}"] }
+      }
+    },
+    {
+      "name": "🔗 27. Get Receipt Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" }
+        ],
+        "url": { "raw": "{{BASE_URL}}/receipt/status/{{RECEIPT_ID}}", "host": ["{{BASE_URL}}"], "path": ["receipt", "status", "{{RECEIPT_ID}}"] }
+      }
+    },
+    {
+      "name": "🔗 28. Verify Receipt",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{ACCESS_TOKEN}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"receiptId\": \"{{RECEIPT_ID}}\"\n}"
+        },
+        "url": { "raw": "{{BASE_URL}}/receipt/verify", "host": ["{{BASE_URL}}"], "path": ["receipt", "verify"] }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "FIRST_HASH_VALUE", "value": "" },
+    { "key": "FIRST_NODE_ID", "value": "" },
+    { "key": "MERKLE_ROOT_HASH", "value": "" },
+    { "key": "MERKLE_PROOF_LEAF_HASH", "value": "" },
+    { "key": "MERKLE_PROOF_JSON", "value": "[]" },
+    { "key": "TX_HASH", "value": "" }
+  ]
+}

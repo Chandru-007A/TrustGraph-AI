@@ -74,12 +74,12 @@ exports.register = (0, catchAsync_1.default)(async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.login = (0, catchAsync_1.default)(async (req, res) => {
     const { email, password } = req.body;
+    // The service already strips `password` and normalises `wallets` via
+    // toSafeUser — the returned object is safe to return verbatim.
     const user = await authService.loginWithEmailAndPassword(email, password);
     const tokens = await tokenService.generateAuthTokens(user.id, user.role);
     setRefreshCookie(res, tokens.refresh.token, tokens.refresh.expires);
-    // Never return the password hash in responses
-    const { password: _, ...safeUser } = user;
-    res.status(http_status_1.default.OK).json(new ApiResponse_1.default(http_status_1.default.OK, 'Login successful', { user: safeUser, tokens }));
+    res.status(http_status_1.default.OK).json(new ApiResponse_1.default(http_status_1.default.OK, 'Login successful', { user, tokens }));
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/v1/auth/refresh

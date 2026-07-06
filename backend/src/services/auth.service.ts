@@ -9,8 +9,8 @@ import logger from '../utils/logger';
 
 /** Strip password from user object before returning to any client. */
 const toSafeUser = (user: { password: string } & Record<string, any>): SafeUser => {
-  const { password, ...safe } = user;
-  return safe as SafeUser;
+  const { password, wallets, ...safe } = user;
+  return { ...(safe as Omit<SafeUser, 'wallets'>), wallets: wallets ?? [] };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,7 +20,8 @@ const toSafeUser = (user: { password: string } & Record<string, any>): SafeUser 
 /**
  * Register a new user.
  * Throws 409 if the email is already taken.
- * Returns the created user without the password field.
+ * Returns the created user without the password field, with an empty
+ * `wallets` array (new users have no wallets yet).
  */
 export const registerUser = async (data: {
   email: string;
@@ -55,13 +56,23 @@ export const registerUser = async (data: {
 /**
  * Authenticate a user with email and password.
  * Returns the full user object (including role) for token generation.
+ * Eagerly loads the user's wallets so the login response shape matches
+ * what /auth/me returns (no client-side flicker after login).
  * Throws 401 with a generic message — never reveals whether the email exists.
  */
 export const loginWithEmailAndPassword = async (
   email: string,
   password: string,
 ) => {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: {
+      wallets: {
+        select: { id: true, address: true, chain: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
 
   // Use constant-time comparison even for missing users to prevent timing attacks
   const passwordValid = user ? await isPasswordMatch(password, user.password) : false;
@@ -71,7 +82,7 @@ export const loginWithEmailAndPassword = async (
   }
 
   logger.info(`User logged in: ${user.email}`);
-  return user;
+  return toSafeUser(user);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

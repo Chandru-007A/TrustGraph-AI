@@ -53,6 +53,17 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
         role: true,
         createdAt: true,
         updatedAt: true,
+        // Eagerly load the user's wallets so /auth/me can surface the
+        // primary wallet address for the dashboard. Empty array if none.
+        wallets: {
+          select: {
+            id: true,
+            address: true,
+            chain: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
         // password is intentionally excluded
       },
     });
@@ -61,7 +72,20 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
       return next(new ApiError(httpStatus.UNAUTHORIZED, 'User no longer exists'));
     }
 
-    req.user = user;
+    // Normalise: a user with no wallets gets `wallets: []` for a stable shape
+    // that matches SafeUser in src/types/auth.types.ts. The Prisma select
+    // above can return undefined if the relation was never loaded.
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      did: user.did,
+      role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      wallets: user.wallets ?? [],
+    };
+    req.user = safeUser;
     next();
   } catch (error) {
     logger.error('Unexpected error in authenticate middleware', error);

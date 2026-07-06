@@ -1,0 +1,419 @@
+// frontend/lib/api/x402.client.ts
+// ----------------------------------------------------------------------------
+// Coinbase x402 v2 client wrapper.
+//
+// Implements the protocol the backend expects (see
+// backend/src/middlewares/x402.middleware.ts + x402.service.ts):
+//
+//   1. Caller issues a request to an x402-protected endpoint.
+//   2. If the backend returns HTTP 402, the response carries a
+//      `PAYMENT-REQUIRED` header — a base64-encoded JSON challenge
+//      describing amount, currency, recipient, network, and a
+//      `reference` to embed in the settlement.
+//   3. The caller (the payment modal) constructs a
+//      `X402SignaturePayload` envelope with a real EIP-712 signature
+//      from the user's wallet and passes it to `settle()` via the
+//      `envelopeOverride` option. As a fallback (dev without a
+//      wallet), the wrapper still supports the `MOCK_SIGNATURE`
+//      sentinel the local facilitator accepts in mock mode.
+//   4. The wrapper retries the request with the `PAYMENT-SIGNATURE`
+//      header. The middleware verifies and marks the entitlement
+//      PAID, returning 200 with the resource and a `PAYMENT-RESPONSE`
+//      header describing the settlement.
+//
+// The wrapper is intentionally a small, stateful class rather than a
+// free function so the drawer's UI can keep a single `unlock` call to
+// wire to its "Unlock" button.
+// ----------------------------------------------------------------------------
+
+import type { AxiosResponse } from 'axios';
+import { ethers } from 'ethers';
+import apiClient from './client';
+import type { ApiResponse } from './types';
+import type {
+  X402Accept,
+  X402Challenge,
+  X402SettlementResult,
+  X402SignaturePayload,
+} from './types';
+
+/** Fallback signature value when no wallet is connected. */
+export const MOCK_SIGNATURE_SENTINEL = 'MOCK_SIGNATURE';
+
+/** Public outcome of a single unlock attempt. */
+export type UnlockOutcome<T> =
+  | {
+      status: 'granted';
+      data: T;
+      settlement: X402SettlementResult | null;
+    }
+  | {
+      status: 'challenge';
+      challenge: X402Challenge;
+      /** Convenience: the first accept entry (most common case). */
+      accept: X402Accept;
+    }
+  | {
+      status: 'expired';
+      message: string;
+      settlement: X402SettlementResult | null;
+    }
+  | {
+      status: 'failed';
+      message: string;
+      settlement: X402SettlementResult | null;
+    }
+  | {
+      status: 'network';
+      message: string;
+      settlement: null;
+    }
+  | {
+      status: 'signature_rejected';
+      message: string;
+    }
+  | {
+      status: 'cancelled';
+      message: string;
+    };
+
+const X402_REQUIRED_HEADER = 'payment-required';
+const X402_RESPONSE_HEADER = 'payment-response';
+
+/** Decode a base64-encoded x402 header. Returns null on malformed input. */
+function decodeHeader<T>(value: string | undefined): T | null {
+  if (!value) return null;
+  try {
+    const json = Buffer.from(value, 'base64').toString('utf8');
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Derive a deterministic EVM address from a user id. Mirrors the
+ * fallback in the backend's `x402Middleware` so the `from` field in
+ * the signature envelope matches what the server expects when the
+ * user has no linked wallet.
+ */
+export function deriveFallbackWallet(userId: string): string {
+  const hash = ethers.keccak256(ethers.toUtf8Bytes(userId));
+  return ethers.getAddress(ethers.dataSlice(hash, 12));
+}
+
+/** Pull a usable wallet address from a `User` (linked wallet or fallback). */
+export function resolveWalletAddress(user: {
+  id: string;
+  wallets?: Array<{ address: string }>;
+}): string {
+  if (user.wallets && user.wallets.length > 0) {
+    return user.wallets[0].address;
+  }
+  return deriveFallbackWallet(user.id);
+}
+
+/** Format an atomic-unit USDC amount (6 decimals) as a human string. */
+export function formatUsdc(atomic: string | number): string {
+  const n = typeof atomic === 'string' ? Number(atomic) : atomic;
+  if (!Number.isFinite(n)) return '—';
+  return (n / 1_000_000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+export interface UnlockOptions {
+  /** Method + path on the x402-protected endpoint (relative to baseURL). */
+  path: string;
+  /** The user's id, used for the deterministic wallet fallback. */
+  userId: string;
+  /** The user's first linked wallet address, if any. */
+  walletAddress: string | null;
+  /**
+   * Skip the in-app prompt and proceed straight to settlement after
+   * the 402 lands. Used for fully automatic flows; the drawer uses
+   * the staged variant instead.
+   */
+  autoSettle?: boolean;
+  /**
+   * Optional hook fired the moment the challenge arrives from the
+   * server, before any settlement attempt. The drawer uses this to
+   * display the price/expiry/buyer before the user confirms.
+   */
+  onChallenge?: (challenge: X402Challenge) => void;
+  /**
+   * Optional hook fired right before the retry is dispatched.
+   * The drawer uses this to swap the UI into the "settling" state.
+   */
+  onSettling?: () => void;
+  /**
+   * Optional hook fired after a successful settlement but before
+   * the retry resolves. The drawer uses this to show the
+   * "Verified Purchase" success card.
+   */
+  onSettled?: (settlement: X402SettlementResult) => void;
+}
+
+/**
+ * Parameters accepted by `settle()`. A subset of `UnlockOptions` —
+ * the path, user id, and wallet address are still needed to rebuild
+ * the request, but the challenge has already been received.
+ */
+export interface SettleOptions {
+  path: string;
+  userId: string;
+  walletAddress: string | null;
+  challenge: X402Challenge;
+  /**
+   * Pre-built `X402SignaturePayload` to send as the `PAYMENT-SIGNATURE`
+   * header. The caller (the payment modal) constructs this after
+   * prompting the user with an EIP-712 signature. If omitted, the
+   * client falls back to the dev sentinel `MOCK_SIGNATURE_SENTINEL`.
+   */
+  envelopeOverride?: X402SignaturePayload;
+  onSettling?: () => void;
+  onSettled?: (settlement: X402SettlementResult) => void;
+}
+
+interface AxiosErrorWithResponse {
+  response?: AxiosResponse<{ accepts?: X402Accept[]; error?: string }> & {
+    status: number;
+  };
+  message?: string;
+}
+
+export class X402Client {
+  /**
+   * Issue an x402-protected GET and run the full challenge → settle →
+   * retry cycle in one call. Returns a tagged result so the caller
+   * can route the UI to the right state without try/catching.
+   */
+  async unlockAndFetch<T>(options: UnlockOptions): Promise<UnlockOutcome<T>> {
+    const headers = this.buildAuthHeaders();
+
+    // ── Step 1: first request — no payment header ─────────────────────
+    let firstAttempt: AxiosResponse<ApiResponse<T>>;
+    try {
+      firstAttempt = await apiClient.get<ApiResponse<T>>(options.path, {
+        headers,
+        validateStatus: () => true, // accept all so we can inspect 402
+      });
+    } catch (err) {
+      // Network / timeout — distinct from a 402.
+      const e = err as AxiosErrorWithResponse;
+      return {
+        status: 'network',
+        message: e?.message ?? 'Network error while requesting node detail',
+        settlement: null,
+      };
+    }
+
+    // 2xx — already unlocked (entitlement persisted from a prior session).
+    if (firstAttempt.status >= 200 && firstAttempt.status < 300) {
+      const settlement = decodeHeader<X402SettlementResult>(
+        firstAttempt.headers?.[X402_RESPONSE_HEADER] ??
+          firstAttempt.headers?.[X402_RESPONSE_HEADER.toLowerCase()],
+      );
+      const data = firstAttempt.data?.data;
+      if (data === undefined) {
+        return {
+          status: 'failed',
+          message: 'Server response was missing the expected payload',
+          settlement,
+        };
+      }
+      return {
+        status: 'granted',
+        data,
+        settlement,
+      };
+    }
+
+    // Anything other than 402 is a real error — surface it.
+    if (firstAttempt.status !== 402) {
+      const errBody = firstAttempt.data as { error?: string; message?: string };
+      return {
+        status: 'failed',
+        message:
+          errBody?.error ??
+          errBody?.message ??
+          `Unexpected response (HTTP ${firstAttempt.status})`,
+        settlement: null,
+      };
+    }
+
+    // ── Step 2: parse the 402 challenge ───────────────────────────────
+    const challenge = decodeHeader<X402Challenge>(
+      firstAttempt.headers?.[X402_REQUIRED_HEADER] ??
+        firstAttempt.headers?.[X402_REQUIRED_HEADER.toLowerCase()],
+    );
+
+    if (!challenge || !challenge.accepts?.length) {
+      return {
+        status: 'failed',
+        message: 'Payment challenge was malformed or empty',
+        settlement: null,
+      };
+    }
+
+    options.onChallenge?.(challenge);
+
+    // If the caller wants manual control (the drawer pattern), return
+    // a `challenge` outcome so the UI can stage a confirm step. The
+    // UI then calls `settle()` explicitly with the challenge.
+    if (!options.autoSettle) {
+      return {
+        status: 'challenge',
+        challenge,
+        accept: challenge.accepts[0],
+      };
+    }
+
+    return this.settle<T>({
+      path: options.path,
+      userId: options.userId,
+      walletAddress: options.walletAddress,
+      challenge,
+      onSettling: options.onSettling,
+      onSettled: options.onSettled,
+    });
+  }
+
+  /**
+   * Build the settlement envelope, retry the request, and return the
+   * final outcome. Exposed so the UI can stage a "Confirm Payment"
+   * button between the challenge and the retry.
+   */
+  async settle<T>(options: SettleOptions): Promise<UnlockOutcome<T>> {
+    const { challenge } = options;
+    const accept = challenge.accepts[0];
+    const walletAddress =
+      options.walletAddress ?? deriveFallbackWallet(options.userId);
+
+    options.onSettling?.();
+
+    // Build the PAYMENT-SIGNATURE envelope. When the caller supplies an
+    // `envelopeOverride` (the production path: the modal prompted the
+    // user with a real EIP-712 typed-data signature), use it as-is.
+    // Otherwise fall back to the dev sentinel the local facilitator
+    // accepts in mock mode — see x402.service.ts → verifyAndSettle
+    // (Mock validation branch).
+    const envelope: X402SignaturePayload =
+      options.envelopeOverride ??
+      {
+        scheme: accept.scheme,
+        network: accept.network,
+        payload: {
+          from: walletAddress,
+          to: accept.payTo,
+          value: accept.amount,
+          validAfter: '0',
+          validBefore: String(
+            Math.floor(new Date(accept.expires).getTime() / 1000),
+          ),
+          nonce: '0x' + Date.now().toString(16),
+          signature: MOCK_SIGNATURE_SENTINEL,
+          reference: accept.reference,
+        },
+      };
+    const signatureHeader = encodeBase64(JSON.stringify(envelope));
+
+    let retry: AxiosResponse<ApiResponse<T>>;
+    try {
+      retry = await apiClient.get<ApiResponse<T>>(options.path, {
+        headers: {
+          ...this.buildAuthHeaders(),
+          'PAYMENT-SIGNATURE': signatureHeader,
+        },
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      const e = err as AxiosErrorWithResponse;
+      return {
+        status: 'network',
+        message: e?.message ?? 'Network error while settling payment',
+        settlement: null,
+      };
+    }
+
+    // Decode PAYMENT-RESPONSE if present.
+    const settlement = decodeHeader<X402SettlementResult>(
+      retry.headers?.[X402_RESPONSE_HEADER] ??
+        retry.headers?.[X402_RESPONSE_HEADER.toLowerCase()],
+    );
+
+    if (retry.status === 200) {
+      options.onSettled?.(
+        settlement ?? {
+          success: true,
+          paymentStatus: 'PAID',
+          message: 'Payment settled',
+        },
+      );
+      const data = retry.data?.data;
+      if (data === undefined) {
+        return {
+          status: 'failed',
+          message: 'Server response was missing the expected payload',
+          settlement,
+        };
+      }
+      return {
+        status: 'granted',
+        data,
+        settlement,
+      };
+    }
+
+    if (retry.status === 402) {
+      // The challenge was rejected — usually because it expired
+      // between the two requests, or because the mock facilitator
+      // failed the value/recipient/sender/sig check.
+      if (settlement?.paymentStatus === 'EXPIRED') {
+        return {
+          status: 'expired',
+          message: 'This payment challenge has expired. Request a new one.',
+          settlement,
+        };
+      }
+      return {
+        status: 'failed',
+        message:
+          settlement?.message ??
+          (retry.data as { error?: string })?.error ??
+          'Payment verification failed',
+        settlement,
+      };
+    }
+
+    return {
+      status: 'failed',
+      message:
+        (retry.data as { error?: string; message?: string })?.message ??
+        `Unexpected response after settlement (HTTP ${retry.status})`,
+      settlement,
+    };
+  }
+
+  /**
+   * Helper: rebuild the request that the axios interceptor would
+   * inject (the Authorization header) without re-running the
+   * interceptor chain, since we set custom headers above.
+   */
+  private buildAuthHeaders(): Record<string, string> {
+    // apiClient interceptors handle Authorization, so we only need
+    // to add x402-specific headers. The interceptor still runs.
+    return {};
+  }
+}
+
+/** Browser-safe base64 encoder (btoa is available everywhere we run). */
+function encodeBase64(s: string): string {
+  if (typeof window === 'undefined') {
+    return Buffer.from(s, 'utf8').toString('base64');
+  }
+  // btoa needs latin1; encode UTF-8 first.
+  return btoa(unescape(encodeURIComponent(s)));
+}
+
+// Re-exported so the drawer doesn't need to know the internal helpers.
+export const x402Client = new X402Client();
+export type { X402Accept, X402Challenge, X402SettlementResult };

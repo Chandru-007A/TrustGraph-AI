@@ -1,0 +1,299 @@
+{
+  "info": {
+    "name": "LEO — Circle Gateway",
+    "description": "Circle Gateway Unified Balance REST API + Webhook events for LEO. Auth: Bearer JWT (set {{auth_token}} from your login). Webhook: HMAC-SHA256 signature (set {{webhook_secret}} to your GATEWAY_WEBHOOK_SECRET).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "leo-circle-gateway-001"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string",
+      "description": "Paste your JWT here. Obtain from POST /api/v1/auth/login."
+    },
+    {
+      "key": "webhook_secret",
+      "value": "",
+      "type": "string",
+      "description": "GATEWAY_WEBHOOK_SECRET — used to compute X-Circle-Signature for the webhook requests."
+    },
+    {
+      "key": "wallet",
+      "value": "0x5e11e80000000000000000000000000000000000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "REST — Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "status"]
+        },
+        "description": "Returns runtime mode (LIVE | MOCK), network, operator address. No body."
+      }
+    },
+    {
+      "name": "REST — Deposit",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"100.5\",\n  \"sourceChain\": \"Arc_Testnet\",\n  \"token\": \"USDC\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/deposit",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "deposit"]
+        },
+        "description": "Deposit USDC into the Unified Balance. Body: { walletAddress, amount, sourceChain?, token? }."
+      }
+    },
+    {
+      "name": "REST — Spend",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"0.005\",\n  \"destinationChain\": \"Arc_Testnet\",\n  \"destinationAddress\": \"0x5e11e80000000000000000000000000000000000\",\n  \"workflowId\": null,\n  \"nodeId\": null,\n  \"paymentReference\": null\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/spend",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "spend"]
+        },
+        "description": "Spend USDC from Unified Balance. Body: { walletAddress, amount, destinationChain, destinationAddress, workflowId?, nodeId?, paymentReference? }."
+      }
+    },
+    {
+      "name": "REST — Balance",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/balance?walletAddress={{wallet}}&token=USDC&includePending=true",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "balance"],
+          "query": [
+            { "key": "walletAddress", "value": "{{wallet}}" },
+            { "key": "token", "value": "USDC" },
+            { "key": "includePending", "value": "true" }
+          ]
+        },
+        "description": "Returns aggregated + per-chain balance for the given wallet."
+      }
+    },
+    {
+      "name": "REST — Transactions (all)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/transactions?limit=50",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "transactions"],
+          "query": [
+            { "key": "limit", "value": "50" }
+          ]
+        },
+        "description": "Audit log of all Gateway operations (DEPOSIT, SPEND, BALANCE, WEBHOOK). Filters: walletAddress, operation, status, workflowId, nodeId, limit."
+      }
+    },
+    {
+      "name": "REST — Transactions (filter SPEND only)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/transactions?operation=SPEND&status=CONFIRMED&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "transactions"],
+          "query": [
+            { "key": "operation", "value": "SPEND" },
+            { "key": "status", "value": "CONFIRMED" },
+            { "key": "limit", "value": "20" }
+          ]
+        },
+        "description": "Filter audit log to SPEND operations only."
+      }
+    },
+    {
+      "name": "Webhook — deposit.completed",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Circle-Signature", "value": "{{hmac_signature}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt_deposit_001\",\n  \"eventType\": \"deposit.completed\",\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"100.5\",\n  \"token\": \"USDC\",\n  \"transactionHash\": \"0x1111111111111111111111111111111111111111111111111111111111111111\",\n  \"sourceChain\": \"Arc_Testnet\",\n  \"status\": \"CONFIRMED\",\n  \"raw\": { \"source\": \"postman\" }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/webhooks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "webhooks"]
+        },
+        "description": "Circle Gateway async event: USDC deposit completed. HMAC-SHA256 of the body keyed by GATEWAY_WEBHOOK_SECRET must be set in the X-Circle-Signature header. Use the pre-request script below to set {{hmac_signature}} automatically."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Compute HMAC-SHA256 of the raw body keyed by {{webhook_secret}}",
+              "const body = pm.request.body.raw;",
+              "if (!body) { return; }",
+              "const secret = pm.variables.get('webhook_secret') || '';",
+              "if (!secret) {",
+              "  console.warn('webhook_secret variable is empty — request will fail in production');",
+              "  return;",
+              "}",
+              "const sig = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('hmac_signature', sig);",
+              "pm.request.headers.upsert({ key: 'X-Circle-Signature', value: sig });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook — spend.completed",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Circle-Signature", "value": "{{hmac_signature}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt_spend_001\",\n  \"eventType\": \"spend.completed\",\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"0.005\",\n  \"token\": \"USDC\",\n  \"transactionHash\": \"0x2222222222222222222222222222222222222222222222222222222222222222\",\n  \"destinationChain\": \"Arc_Testnet\",\n  \"status\": \"CONFIRMED\",\n  \"raw\": { \"transferId\": \"trf_001\" }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/webhooks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "webhooks"]
+        },
+        "description": "Circle Gateway async event: spend minted on destination chain. Idempotent on eventId."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.request.body.raw;",
+              "if (!body) { return; }",
+              "const secret = pm.variables.get('webhook_secret') || '';",
+              "if (!secret) { console.warn('webhook_secret variable is empty'); return; }",
+              "const sig = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('hmac_signature', sig);",
+              "pm.request.headers.upsert({ key: 'X-Circle-Signature', value: sig });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook — transfer.failed",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Circle-Signature", "value": "{{hmac_signature}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt_transfer_failed_001\",\n  \"eventType\": \"transfer.failed\",\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"0.5\",\n  \"token\": \"USDC\",\n  \"status\": \"FAILED\",\n  \"raw\": { \"reason\": \"attestation timeout\" }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/webhooks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "webhooks"]
+        },
+        "description": "Circle Gateway async event: cross-chain transfer failed. Recorded with status=FAILED."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.request.body.raw;",
+              "if (!body) { return; }",
+              "const secret = pm.variables.get('webhook_secret') || '';",
+              "if (!secret) { console.warn('webhook_secret variable is empty'); return; }",
+              "const sig = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('hmac_signature', sig);",
+              "pm.request.headers.upsert({ key: 'X-Circle-Signature', value: sig });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook — balance.updated",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Circle-Signature", "value": "{{hmac_signature}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt_balance_001\",\n  \"eventType\": \"balance.updated\",\n  \"walletAddress\": \"{{wallet}}\",\n  \"amount\": \"1500.0\",\n  \"token\": \"USDC\",\n  \"status\": \"CONFIRMED\",\n  \"raw\": { \"source\": \"external deposit\" }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/gateway/webhooks",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "gateway", "webhooks"]
+        },
+        "description": "Circle Gateway async event: balance changed outside our spend flow (e.g. external deposit). Captured as a BALANCE audit row."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.request.body.raw;",
+              "if (!body) { return; }",
+              "const secret = pm.variables.get('webhook_secret') || '';",
+              "if (!secret) { console.warn('webhook_secret variable is empty'); return; }",
+              "const sig = CryptoJS.HmacSHA256(body, secret).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('hmac_signature', sig);",
+              "pm.request.headers.upsert({ key: 'X-Circle-Signature', value: sig });"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

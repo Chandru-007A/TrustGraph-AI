@@ -1,0 +1,244 @@
+{
+	"info": {
+		"_postman_id": "c402c0c0-6d45-4237-9759-4d642e61a6b1",
+		"name": "LEO x402 Payment Protocol Testing",
+		"description": "Collection to verify the Coinbase x402 payment flow, HTTP 402 challenge header, payment validation, and node unlocking.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Access Protected Node without Payment (Should return HTTP 402)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 402\", function () {",
+							"    pm.response.to.have.status(402);",
+							"});",
+							"pm.test(\"PAYMENT-REQUIRED header exists\", function () {",
+							"    pm.response.to.have.header(\"PAYMENT-REQUIRED\");",
+							"    var rawHeader = pm.response.headers.get(\"PAYMENT-REQUIRED\");",
+							"    var decoded = JSON.parse(atob(rawHeader));",
+							"    pm.environment.set(\"paymentReference\", decoded.accepts[0].reference);",
+							"    pm.environment.set(\"paymentAmount\", decoded.accepts[0].amount);",
+							"    pm.environment.set(\"usdcAddress\", decoded.accepts[0].asset);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{authToken}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/workflow/node/{{nodeId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"workflow",
+						"node",
+						"{{nodeId}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "2. Verify Payment Directly (POST /payment/verify)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"pm.test(\"PAYMENT-RESPONSE header exists\", function () {",
+							"    pm.response.to.have.header(\"PAYMENT-RESPONSE\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{authToken}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"signatureHeader\": \"{{mockSignatureHeader}}\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/payment/verify",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"payment",
+						"verify"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Access Protected Node with PAYMENT-SIGNATURE Header (Should return HTTP 200)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"pm.test(\"Returns node details\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.data.id).to.eql(pm.environment.get(\"nodeId\"));",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{authToken}}",
+						"type": "text"
+					},
+					{
+						"key": "PAYMENT-SIGNATURE",
+						"value": "{{mockSignatureHeader}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/workflow/node/{{nodeId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"workflow",
+						"node",
+						"{{nodeId}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Get Payment Entitlement History",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{authToken}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/payment/history",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"payment",
+						"history"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Get Payment Entitlement Status",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{authToken}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{baseUrl}}/payment/status/{{paymentId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"payment",
+						"status",
+						"{{paymentId}}"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "nodeId",
+			"value": "ENTER_NODE_UUID_HERE",
+			"type": "string"
+		},
+		{
+			"key": "paymentId",
+			"value": "ENTER_PAYMENT_UUID_HERE",
+			"type": "string"
+		},
+		{
+			"key": "mockSignatureHeader",
+			"value": "eyJzY2hlbWUiOiJleGFjdCIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MyIsInBheWxvYWQiOnsiZnJvbSI6IjB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInRvIjoiMHg1ZTExZTgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwidmFsdWUiOiIxMDAwIiwidmFsaWRBZnRlciI6IjAiLCJ2YWxpZEJlZm9yZSI6IjE3NTE2MTYwMDAiLCJub25jZSI6IjB4MTIzIiwic2lnbmF0dXJlIjoiTU9DS19TSUdOQVRVUkUiLCJyZWZlcmVuY2UiOiJleGFtcGxlX3JlZmVyZW5jZV91dWlkIn19",
+			"type": "string"
+		}
+	]
+}

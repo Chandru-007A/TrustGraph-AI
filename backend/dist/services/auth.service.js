@@ -13,8 +13,8 @@ const token_service_1 = require("./token.service");
 const logger_1 = __importDefault(require("../utils/logger"));
 /** Strip password from user object before returning to any client. */
 const toSafeUser = (user) => {
-    const { password, ...safe } = user;
-    return safe;
+    const { password, wallets, ...safe } = user;
+    return { ...safe, wallets: wallets ?? [] };
 };
 // ─────────────────────────────────────────────────────────────────────────────
 // Register
@@ -22,7 +22,8 @@ const toSafeUser = (user) => {
 /**
  * Register a new user.
  * Throws 409 if the email is already taken.
- * Returns the created user without the password field.
+ * Returns the created user without the password field, with an empty
+ * `wallets` array (new users have no wallets yet).
  */
 const registerUser = async (data) => {
     const existing = await prisma_1.default.user.findUnique({ where: { email: data.email } });
@@ -48,17 +49,27 @@ exports.registerUser = registerUser;
 /**
  * Authenticate a user with email and password.
  * Returns the full user object (including role) for token generation.
+ * Eagerly loads the user's wallets so the login response shape matches
+ * what /auth/me returns (no client-side flicker after login).
  * Throws 401 with a generic message — never reveals whether the email exists.
  */
 const loginWithEmailAndPassword = async (email, password) => {
-    const user = await prisma_1.default.user.findUnique({ where: { email } });
+    const user = await prisma_1.default.user.findUnique({
+        where: { email },
+        include: {
+            wallets: {
+                select: { id: true, address: true, chain: true, createdAt: true },
+                orderBy: { createdAt: 'asc' },
+            },
+        },
+    });
     // Use constant-time comparison even for missing users to prevent timing attacks
     const passwordValid = user ? await (0, encryption_1.isPasswordMatch)(password, user.password) : false;
     if (!user || !passwordValid) {
         throw new ApiError_1.default(http_status_1.default.UNAUTHORIZED, 'Invalid email or password');
     }
     logger_1.default.info(`User logged in: ${user.email}`);
-    return user;
+    return toSafeUser(user);
 };
 exports.loginWithEmailAndPassword = loginWithEmailAndPassword;
 // ─────────────────────────────────────────────────────────────────────────────

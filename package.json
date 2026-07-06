@@ -1,0 +1,7 @@
+{
+	"dependencies": {
+		"@rainbow-me/rainbowkit": "^2.2.11",
+		"viem": "^2.54.3",
+		"wagmi": "^2.19.5"
+	}
+}
