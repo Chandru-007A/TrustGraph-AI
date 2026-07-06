@@ -1,24 +1,24 @@
 // frontend/app/dashboard/[sessionId]/dag/page.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Interactive DAG visualisation for a verified research workflow.
+// Interactive DAG visualisation for a verified research workflow —
+// cinematic edition.
 //
 // Data flow:
 //   1. useWorkflowProgress(sessionId)     — 2s polling; stops on terminal status.
-//   2. workflowService.getReactFlowGraph(workflowId) — positions + edges.
+//   2. workflowService.getReactFlowGraph(sessionId) — positions + edges.
 //
 // The session detail is the source of truth for tooltip / drawer
 // fields (status, startTime, endTime, hash, parents, children); the
 // graph-json endpoint provides layout only. The two are merged in
 // <DagCanvas> via a Map lookup by node id.
 //
-// What this page is:
-//   • Header summary (Workflow ID, Session ID, Merkle root, Node count).
-//   • React Flow canvas with status-coloured nodes, animated running
-//     edges, Background, Controls, and a MiniMap.
-//   • Right-side drawer on node click with the spec's 9 fields.
-//
-// What this page is NOT:
-//   • A raw JSON viewer (that path was removed in this revision).
+// Visual additions (cinematic):
+//   • Header H1 reveals with the existing `animate-char-in` keyframe
+//     (per-character, staggered)
+//   • Subtitle fades in with motion.div
+//   • Summary tiles reveal on viewport entry via motion.div + whileInView
+//   • Two ambient orbs (`animate-orb-a/b`) drift behind the canvas
+//   • The canvas is wrapped in a layered ambient background
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 
 import { useAuth } from '@/hooks/use-auth';
 import { apiClient } from '@/lib/api';
@@ -46,6 +47,8 @@ import { DagCanvas } from '@/components/dashboard/dag-canvas';
 import { DagDrawer } from '@/components/dashboard/dag-drawer';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+
+const PAGE_TITLE = 'DAG viewer';
 
 export default function DagPage() {
   const params = useParams();
@@ -107,9 +110,44 @@ export default function DagPage() {
 
   return (
     <main className="relative min-h-screen overflow-x-hidden noise-overlay">
+      {/* Layered ambient background — radial gradient + drifting orbs */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+      >
+        <div
+          className="absolute inset-0 animate-aurora"
+          style={{
+            background:
+              'radial-gradient(ellipse at 25% 0%, oklch(0.7 0.13 232 / 0.10), transparent 55%), radial-gradient(ellipse at 80% 100%, oklch(0.78 0.15 168 / 0.08), transparent 55%)',
+          }}
+        />
+        <div
+          className="absolute -top-32 -left-24 size-[28rem] rounded-full blur-3xl opacity-50 animate-orb-a"
+          style={{
+            background:
+              'radial-gradient(circle, oklch(0.7 0.13 232 / 0.30), transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute -bottom-40 -right-20 size-[32rem] rounded-full blur-3xl opacity-40 animate-orb-b"
+          style={{
+            background:
+              'radial-gradient(circle, oklch(0.78 0.15 168 / 0.28), transparent 70%)',
+          }}
+        />
+        {/* Subtle grid overlay */}
+        <div className="absolute inset-0 grid-bg opacity-40" />
+      </div>
+
       <div className="max-w-7xl mx-auto px-6 lg:px-12 py-10">
         {/* Top bar */}
-        <div className="mb-10 flex items-center justify-between gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+          className="mb-10 flex items-center justify-between gap-4"
+        >
           <Link
             href={`/dashboard/${sessionId}`}
             className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors group"
@@ -120,19 +158,37 @@ export default function DagPage() {
           <Button asChild variant="outline" size="sm" className="rounded-full">
             <Link href="/dashboard">All sessions</Link>
           </Button>
-        </div>
+        </motion.div>
 
         <header className="mb-8">
-          <p className="text-sm text-muted-foreground font-mono mb-3">
+          <motion.p
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="text-sm text-muted-foreground font-mono mb-3"
+          >
             Execution graph
-          </p>
-          <h1 className="text-3xl lg:text-4xl font-display tracking-tight mb-2">
-            DAG viewer
+          </motion.p>
+          <h1 className="text-3xl lg:text-4xl font-display tracking-tight mb-2 flex flex-wrap">
+            {PAGE_TITLE.split('').map((ch, i) => (
+              <span
+                key={`${ch}-${i}`}
+                className="animate-char-in text-gradient inline-block"
+                style={{ animationDelay: `${i * 32}ms` }}
+              >
+                {ch === ' ' ? ' ' : ch}
+              </span>
+            ))}
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <motion.p
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.45 }}
+            className="text-sm text-muted-foreground max-w-2xl"
+          >
             Interactive visualisation of the verified reasoning DAG. Drag
             nodes, scroll to zoom, click a stage to inspect.
-          </p>
+          </motion.p>
         </header>
 
         {sessionQuery.isPending ? (
@@ -165,6 +221,7 @@ export default function DagPage() {
               }
               onRetry={() => void graphQuery.refetch()}
               onNodeSelect={handleNodeSelect}
+              isDrawerOpen={drawerOpen}
             />
           </div>
         ) : null}
@@ -197,24 +254,24 @@ function SummaryGrid({
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Tile
+      <SummaryTile
         label="Workflow ID"
         icon={<WorkflowIcon className="w-3.5 h-3.5" />}
         value={workflowId}
       />
-      <Tile label="Session ID" value={sessionId} />
-      <Tile
+      <SummaryTile label="Session ID" value={sessionId} />
+      <SummaryTile
         label="Merkle root"
         icon={<ShieldCheck className="w-3.5 h-3.5" />}
         value={merkleRootHash ?? 'Not anchored yet'}
         truncate
       />
-      <Tile label="Nodes in DAG" value={String(nodeCount)} />
+      <SummaryTile label="Nodes in DAG" value={String(nodeCount)} />
     </div>
   );
 }
 
-function Tile({
+function SummaryTile({
   label,
   value,
   icon,
@@ -226,7 +283,14 @@ function Tile({
   truncate?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-card/40 px-4 py-3 flex flex-col gap-1.5 min-w-0">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-40px' }}
+      transition={{ type: 'spring', stiffness: 240, damping: 26 }}
+      whileHover={{ y: -2 }}
+      className="rounded-xl border border-border/60 bg-card/40 px-4 py-3 flex flex-col gap-1.5 min-w-0"
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
           {label}
@@ -241,13 +305,19 @@ function Tile({
       >
         {value}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 function PageSkeleton() {
   return (
-    <div className="space-y-6" aria-hidden>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="space-y-6"
+      aria-hidden
+    >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
@@ -257,7 +327,7 @@ function PageSkeleton() {
         ))}
       </div>
       <div className="h-[640px] rounded-2xl border border-border/60 glass-strong animate-pulse" />
-    </div>
+    </motion.div>
   );
 }
 
@@ -269,7 +339,12 @@ function PageError({
   onRetry: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 lg:p-8 space-y-4">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+      className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 lg:p-8 space-y-4"
+    >
       <div className="flex items-start gap-3">
         <div className="size-9 rounded-lg border border-destructive/40 bg-destructive/10 flex items-center justify-center shrink-0">
           <Loader2 className="w-4 h-4 text-destructive" />
@@ -283,14 +358,20 @@ function PageError({
           </p>
         </div>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="rounded-full"
-        onClick={onRetry}
+      <motion.div
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.96 }}
+        className="inline-block"
       >
-        Try again
-      </Button>
-    </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-full"
+          onClick={onRetry}
+        >
+          Try again
+        </Button>
+      </motion.div>
+    </motion.div>
   );
 }

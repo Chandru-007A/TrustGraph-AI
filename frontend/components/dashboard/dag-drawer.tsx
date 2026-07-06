@@ -1,33 +1,31 @@
 // frontend/components/dashboard/dag-drawer.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Right-side detail drawer for a single DAG node.
+// Right-side detail drawer for a single DAG node — stage-projection edition.
 //
 // Opens when a user clicks a node on the canvas; closes via the X button,
-// the overlay click, or the Escape key (Radix default).
+// the backdrop click, or the Escape key.
 //
-// Contents (per the page spec):
-//   • Header        — stage display label + status badge
-//   • Stage         — display label + raw backend name + step index
-//   • Agent         — agent DID (or "—")
-//   • Prompt        — x402 unlock experience (idle / challenge /
-//                     settling / success / failed / expired / network)
-//   • Output Preview — same x402 unlock experience, scoped to the
-//                     output-side hashes
-//   • Execution Duration — formatted wall-clock
-//   • Hash          — full anchor hash, truncated copyable
-//   • Started / Finished — wall-clock timestamps
-//   • Status        — full enum + human label
-//   • Parent Nodes  — list of parent stage labels (by name resolution)
-//   • Child Nodes   — list of child stage labels
+// Visual contract (cinematic):
+//   • Backdrop dims (60% black) + blurs (md)
+//   • Panel slides in from the right with a spring
+//   • Header is a horizontal strip with a gradient bar at the top,
+//     a large display label that reveals, and a status pill that
+//     colour-morphs
+//   • Body sections reveal sequentially (stagger 50ms per section) so the
+//     eye is led through the document top-to-bottom
+//
+// Contents (per the page spec) are unchanged:
+//   • Stage / Agent / Prompt / Output Preview / Duration / Hash /
+//     Started / Finished / Status / Parent / Child
 //
 // The drawer no longer fakes a "Locked" placeholder — the unlock
 // experience is a real, end-to-end interaction with the backend's
-// x402 middleware.
+// x402 middleware (the unlock sequence lives in dag-drawer-unlock.tsx).
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   AlertOctagon,
   CheckCircle2,
@@ -40,14 +38,9 @@ import {
   Timer,
   Workflow as WorkflowIcon,
   XCircle,
+  X,
 } from 'lucide-react';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
@@ -113,6 +106,27 @@ export function DagDrawer({
   sessionId,
 }: DagDrawerProps) {
   const { user } = useAuth();
+
+  // ── Body-scroll lock while the modal is open ────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // ── Escape key closes the modal ─────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onOpenChange]);
+
   // Resolve parents/children by id (preferred) with a positional fallback
   // so the list is useful even when the backend omits parent/child ids.
   const related = useMemo(() => {
@@ -135,7 +149,7 @@ export function DagDrawer({
     return { parents, children };
   }, [node, allNodes]);
 
-  const status = node ? deriveDisplayStatus(node) : 'waiting';
+  const status: DisplayStatus = node ? deriveDisplayStatus(node) : 'waiting';
   const meta = STATUS_META[status];
   const StatusIcon = meta.icon;
   const hash = node?.hashes?.[0]?.hashValue ?? null;
@@ -146,158 +160,114 @@ export function DagDrawer({
       : null;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="glass-strong w-full sm:max-w-md p-0 overflow-y-auto"
-      >
-        {node ? (
-          <div className="flex h-full flex-col">
-            {/* ── Header ────────────────────────────────────────── */}
-            <SheetHeader className="border-b border-border/60 p-6 space-y-3">
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    'flex size-9 items-center justify-center rounded-lg border',
-                    meta.badge,
-                  )}
-                >
-                  <StatusIcon
+    <AnimatePresence>
+      {open && node ? (
+        <motion.div
+          key="drawer-root"
+          className="fixed inset-0 z-50 flex"
+          initial="hidden"
+          animate="visible"
+          exit="hidden"
+        >
+          {/* Backdrop — dims + blurs the canvas behind */}
+          <motion.div
+            className="absolute inset-0 bg-background/60 backdrop-blur-md"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: { opacity: 1 },
+            }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => onOpenChange(false)}
+            aria-hidden
+          />
+
+          {/* Panel — slides in from the right with a spring */}
+          <motion.aside
+            layoutId={node ? `node-detail-${node.id}` : undefined}
+            className="relative ml-auto h-full w-full sm:max-w-md overflow-hidden border-l border-border/60 glass-strong shadow-2xl"
+            initial={{ x: 80, opacity: 0, scale: 0.97 }}
+            animate={{ x: 0, opacity: 1, scale: 1 }}
+            exit={{ x: 60, opacity: 0, scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dag-drawer-title"
+          >
+            {/* Cinematic gradient bar at the top */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent"
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 h-[2px] animate-border-sweep"
+            />
+
+            <motion.div
+              className="flex h-full flex-col overflow-y-auto"
+              initial="hidden"
+              animate="visible"
+              variants={{
+                hidden: { opacity: 1 },
+                visible: {
+                  opacity: 1,
+                  transition: { staggerChildren: 0.05, delayChildren: 0.18 },
+                },
+              }}
+            >
+              {/* ── Header ────────────────────────────── */}
+              <motion.header
+                className="relative border-b border-border/60 p-6 space-y-3"
+                variants={{
+                  hidden: { opacity: 0, y: 8 },
+                  visible: { opacity: 1, y: 0 },
+                }}
+                transition={{ type: 'spring', stiffness: 240, damping: 26 }}
+              >
+                <div className="flex items-start gap-3">
+                  <div
                     className={cn(
-                      'size-4',
-                      meta.color,
-                      status === 'running' && 'animate-spin',
+                      'flex size-9 shrink-0 items-center justify-center rounded-lg border',
+                      meta.badge,
                     )}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <SheetTitle className="text-base font-display tracking-tight">
-                    {displayLabel}
-                  </SheetTitle>
-                  <SheetDescription className="text-xs font-mono">
-                    {node.nodeName} · step {String(node.stepIndex + 1).padStart(2, '0')}
-                  </SheetDescription>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={cn(
-                    'rounded-full border px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider',
-                    meta.badge,
-                  )}
-                >
-                  {meta.label}
-                </span>
-                {node.status === 'FAILED' && node.error ? (
-                  <span className="rounded-full border border-destructive/40 bg-destructive/5 px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-destructive">
-                    {node.error}
-                  </span>
-                ) : null}
-              </div>
-            </SheetHeader>
-
-            {/* ── Body ──────────────────────────────────────────── */}
-            <div className="flex-1 space-y-5 p-6">
-              <Section icon={<WorkflowIcon className="size-3.5" />} label="Stage">
-                <div className="text-sm text-foreground/90">{displayLabel}</div>
-                <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                  {node.nodeName}
-                </div>
-              </Section>
-
-              <Section
-                icon={<ShieldCheck className="size-3.5" />}
-                label="Agent"
-              >
-                <div
-                  className="truncate text-sm font-mono text-foreground/90"
-                  title={node.agentDid ?? '—'}
-                >
-                  {node.agentDid ?? '—'}
-                </div>
-              </Section>
-
-              <Section
-                icon={<WorkflowIcon className="size-3.5" />}
-                label="Prompt"
-              >
-                {user ? (
-                  <DagDrawerUnlock
-                    user={user}
-                    sessionId={sessionId}
-                    node={node}
-                    variant="prompt"
                   >
-                    {({ node: unlocked, settlement }) => (
-                      <UnlockedPrompt
-                        node={unlocked}
-                        settlement={settlement}
-                      />
-                    )}
-                  </DagDrawerUnlock>
-                ) : null}
-              </Section>
-
-              <Section
-                icon={<ExternalLink className="size-3.5" />}
-                label="Output Preview"
-              >
-                {user ? (
-                  <DagDrawerUnlock
-                    user={user}
-                    sessionId={sessionId}
-                    node={node}
-                    variant="output"
+                    <StatusIcon
+                      className={cn(
+                        'size-4',
+                        meta.color,
+                        status === 'running' && 'animate-spin',
+                      )}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <motion.h2
+                      id="dag-drawer-title"
+                      className="text-base font-display tracking-tight text-foreground/95"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        type: 'spring',
+                        stiffness: 280,
+                        damping: 24,
+                        delay: 0.1,
+                      }}
+                    >
+                      {displayLabel}
+                    </motion.h2>
+                    <p className="text-xs font-mono text-muted-foreground">
+                      {node.nodeName} · step {String(node.stepIndex + 1).padStart(2, '0')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onOpenChange(false)}
+                    aria-label="Close"
+                    className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card/80 hover:text-foreground"
                   >
-                    {({ node: unlocked, settlement }) => (
-                      <UnlockedOutput
-                        node={unlocked}
-                        settlement={settlement}
-                      />
-                    )}
-                  </DagDrawerUnlock>
-                ) : null}
-              </Section>
-
-              <Section icon={<Timer className="size-3.5" />} label="Execution Duration">
-                <div className="text-sm font-mono text-foreground/90">
-                  {duration ?? '—'}
+                    <X className="size-4" />
+                  </button>
                 </div>
-                <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                  {node.startTime && node.endTime
-                    ? `${formatClock(node.startTime)} → ${formatClock(node.endTime)}`
-                    : 'Awaiting timestamps'}
-                </div>
-              </Section>
-
-              <Section icon={<HashIcon className="size-3.5" />} label="Hash">
-                {hash ? (
-                  <HashValue value={hash} />
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    Not anchored yet
-                  </div>
-                )}
-              </Section>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Section icon={<Clock className="size-3.5" />} label="Started">
-                  <div className="text-sm font-mono text-foreground/90">
-                    {formatClock(node.startTime) ?? '—'}
-                  </div>
-                </Section>
-                <Section icon={<Clock className="size-3.5" />} label="Finished">
-                  <div className="text-sm font-mono text-foreground/90">
-                    {formatClock(node.endTime) ?? '—'}
-                  </div>
-                </Section>
-              </div>
-
-              <Section
-                icon={<XCircle className="size-3.5" />}
-                label="Status"
-              >
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={cn(
                       'rounded-full border px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider',
@@ -306,41 +276,156 @@ export function DagDrawer({
                   >
                     {meta.label}
                   </span>
-                  <span className="text-[10px] font-mono text-muted-foreground">
-                    {node.status}
-                  </span>
+                  {node.status === 'FAILED' && node.error ? (
+                    <span className="rounded-full border border-destructive/40 bg-destructive/5 px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-destructive">
+                      {node.error}
+                    </span>
+                  ) : null}
                 </div>
-              </Section>
+              </motion.header>
 
-              {related.parents.length > 0 ? (
-                <RelatedList
+              {/* ── Body ─────────────────────────────── */}
+              <div className="flex-1 space-y-5 p-6">
+                <DrawerSection
                   icon={<WorkflowIcon className="size-3.5" />}
-                  label="Parent Nodes"
-                  nodes={related.parents}
-                />
-              ) : null}
-              {related.children.length > 0 ? (
-                <RelatedList
+                  label="Stage"
+                >
+                  <div className="text-sm text-foreground/90">{displayLabel}</div>
+                  <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                    {node.nodeName}
+                  </div>
+                </DrawerSection>
+
+                <DrawerSection
+                  icon={<ShieldCheck className="size-3.5" />}
+                  label="Agent"
+                >
+                  <div
+                    className="truncate text-sm font-mono text-foreground/90"
+                    title={node.agentDid ?? '—'}
+                  >
+                    {node.agentDid ?? '—'}
+                  </div>
+                </DrawerSection>
+
+                <DrawerSection
                   icon={<WorkflowIcon className="size-3.5" />}
-                  label="Child Nodes"
-                  nodes={related.children}
-                />
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-            Select a node to inspect its details.
-          </div>
-        )}
-      </SheetContent>
-    </Sheet>
+                  label="Prompt"
+                >
+                  {user ? (
+                    <DagDrawerUnlock
+                      user={user}
+                      sessionId={sessionId}
+                      node={node}
+                      variant="prompt"
+                    >
+                      {({ node: unlocked, settlement }) => (
+                        <UnlockedPrompt
+                          node={unlocked}
+                          settlement={settlement}
+                        />
+                      )}
+                    </DagDrawerUnlock>
+                  ) : null}
+                </DrawerSection>
+
+                <DrawerSection
+                  icon={<ExternalLink className="size-3.5" />}
+                  label="Output Preview"
+                >
+                  {user ? (
+                    <DagDrawerUnlock
+                      user={user}
+                      sessionId={sessionId}
+                      node={node}
+                      variant="output"
+                    >
+                      {({ node: unlocked, settlement }) => (
+                        <UnlockedOutput
+                          node={unlocked}
+                          settlement={settlement}
+                        />
+                      )}
+                    </DagDrawerUnlock>
+                  ) : null}
+                </DrawerSection>
+
+                <DrawerSection icon={<Timer className="size-3.5" />} label="Execution Duration">
+                  <div className="text-sm font-mono text-foreground/90">
+                    {duration ?? '—'}
+                  </div>
+                  <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                    {node.startTime && node.endTime
+                      ? `${formatClock(node.startTime)} → ${formatClock(node.endTime)}`
+                      : 'Awaiting timestamps'}
+                  </div>
+                </DrawerSection>
+
+                <DrawerSection icon={<HashIcon className="size-3.5" />} label="Hash">
+                  {hash ? (
+                    <HashValue value={hash} />
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Not anchored yet
+                    </div>
+                  )}
+                </DrawerSection>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <DrawerSection icon={<Clock className="size-3.5" />} label="Started">
+                    <div className="text-sm font-mono text-foreground/90">
+                      {formatClock(node.startTime) ?? '—'}
+                    </div>
+                  </DrawerSection>
+                  <DrawerSection icon={<Clock className="size-3.5" />} label="Finished">
+                    <div className="text-sm font-mono text-foreground/90">
+                      {formatClock(node.endTime) ?? '—'}
+                    </div>
+                  </DrawerSection>
+                </div>
+
+                <DrawerSection icon={<XCircle className="size-3.5" />} label="Status">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        'rounded-full border px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+                        meta.badge,
+                      )}
+                    >
+                      {meta.label}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {node.status}
+                    </span>
+                  </div>
+                </DrawerSection>
+
+                {related.parents.length > 0 ? (
+                  <RelatedList
+                    icon={<WorkflowIcon className="size-3.5" />}
+                    label="Parent Nodes"
+                    nodes={related.parents}
+                  />
+                ) : null}
+                {related.children.length > 0 ? (
+                  <RelatedList
+                    icon={<WorkflowIcon className="size-3.5" />}
+                    label="Child Nodes"
+                    nodes={related.children}
+                  />
+                ) : null}
+              </div>
+            </motion.div>
+          </motion.aside>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
 // ── Small local helpers ────────────────────────────────────────────────
 
-function Section({
+function DrawerSection({
   icon,
   label,
   children,
@@ -350,7 +435,14 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <motion.section
+      variants={{
+        hidden: { opacity: 0, y: 10 },
+        visible: { opacity: 1, y: 0 },
+      }}
+      transition={{ type: 'spring', stiffness: 240, damping: 26 }}
+      className="space-y-1.5"
+    >
       <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         <span className="text-muted-foreground/70">{icon}</span>
         {label}
@@ -358,7 +450,7 @@ function Section({
       <div className="rounded-lg border border-border/50 bg-card/40 px-3 py-2">
         {children}
       </div>
-    </div>
+    </motion.section>
   );
 }
 
@@ -579,7 +671,14 @@ function RelatedList({
   nodes: WorkflowNode[];
 }) {
   return (
-    <div className="space-y-1.5">
+    <motion.section
+      variants={{
+        hidden: { opacity: 0, y: 10 },
+        visible: { opacity: 1, y: 0 },
+      }}
+      transition={{ type: 'spring', stiffness: 240, damping: 26 }}
+      className="space-y-1.5"
+    >
       <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
         <span className="text-muted-foreground/70">{icon}</span>
         {label}
@@ -595,6 +694,6 @@ function RelatedList({
           </span>
         ))}
       </div>
-    </div>
+    </motion.section>
   );
 }

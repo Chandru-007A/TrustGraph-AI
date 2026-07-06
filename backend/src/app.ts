@@ -26,7 +26,26 @@ app.use(
     origin: config.corsOrigin,
     credentials: true, // Allow cookies to be sent cross-origin
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      // x402 protocol: the signed envelope rides on `PAYMENT-SIGNATURE`.
+      // Browsers won't send it on the retry unless the preflight
+      // (OPTIONS) response explicitly allows it. Without these lines
+      // the retry after MetaMask signing is aborted by the browser
+      // before it leaves — surfaces as "Network Error" with no
+      // server-side log.
+      'PAYMENT-SIGNATURE',
+      'PAYMENT-REQUIRED',
+      'PAYMENT-RESPONSE',
+    ],
+    // x402 protocol: the 402 challenge arrives on the `PAYMENT-REQUIRED`
+    // response header and the settlement receipt on `PAYMENT-RESPONSE`.
+    // Browsers strip non-safelisted headers from cross-origin responses
+    // unless they're explicitly exposed here — without this line the
+    // frontend's x402 client sees no header and surfaces
+    // "Payment challenge was malformed or empty".
+    exposedHeaders: ['PAYMENT-REQUIRED', 'PAYMENT-RESPONSE'],
   }),
 );
 

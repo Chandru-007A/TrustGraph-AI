@@ -1,21 +1,22 @@
 // frontend/components/dashboard/dag-drawer-unlock.tsx
 // ─────────────────────────────────────────────────────────────────────────────
 // x402 Unlock trigger for the DAG drawer's premium content slots
-// (Prompt and Output Preview).
+// (Prompt and Output Preview) — cinematic edition.
 //
-// In Phase 22 this file is intentionally thin: it owns the locked card
-// chrome (the price/network/unlock preview + the "Unlock Reasoning" /
-// "Connect Wallet" buttons) and the success early-return. The
-// full multi-step state machine (challenge → sign → settle → verify →
-// unlock) moved into <PaymentModal> as a shadcn Dialog.
+// Owns the locked card chrome (price/network/unlock preview + Unlock /
+// Connect Wallet buttons) and the success early-return. The full
+// multi-step state machine (challenge → sign → settle → verify →
+// unlock) lives in <PaymentModal> as a shadcn Dialog.
 //
-// Visual contract (preserved from Phase 21):
-//   • Locked card with 🔒, "Premium Reasoning" / "Output Preview" title
-//   • Price / Network / Unlock preview fields
-//   • "Unlock Reasoning" or "Connect Wallet" CTA
-//
-// On success, the children-as-function slot renders the unlocked
-// content (UnlockedPrompt / UnlockedOutput in dag-drawer.tsx).
+// Visual contract (cinematic):
+//   • Locked card — gradient border + animated top hairline + pulsing lock
+//   • Price / Network / Unlock fields with motion hover-lift
+//   • Primary button with motion tap scale
+//   • On success, the unlocked children are revealed inside a
+//     `motion.div` that plays a 1.0-second unlock sequence: border
+//     sweep, particle burst, and a glow-pulse-twice. The success
+//     children themselves fade in with a small delay so the sweep
+//     lands first.
 // ─────────────────────────────────────────────────────────────────────────────
 
 'use client';
@@ -27,6 +28,7 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import {
   Dialog,
   DialogTrigger,
@@ -72,6 +74,24 @@ interface DagDrawerUnlockProps {
   }) => React.ReactNode;
 }
 
+// 12 deterministic particle vectors — keyed off the variant so the
+// burst shape is stable between renders. Pure CSS via --tx/--ty
+// custom properties on `.particle-dot`.
+const PARTICLE_VECTORS: { tx: number; ty: number }[] = [
+  { tx: -90, ty: -50 },
+  { tx: -70, ty: -90 },
+  { tx: -30, ty: -110 },
+  { tx: 10, ty: -120 },
+  { tx: 50, ty: -100 },
+  { tx: 90, ty: -60 },
+  { tx: 110, ty: -10 },
+  { tx: 100, ty: 40 },
+  { tx: 60, ty: 90 },
+  { tx: 0, ty: 110 },
+  { tx: -50, ty: 80 },
+  { tx: -100, ty: 20 },
+];
+
 export function DagDrawerUnlock({
   user,
   sessionId,
@@ -90,9 +110,56 @@ export function DagDrawerUnlock({
     [wallet.address, user],
   );
 
-  // ── Success early return — parent renders unlocked content ─────────
+  // ── Success early return ─ unlock sequence + unlocked children ─────
   if (state.status === 'success') {
-    return <>{children({ node: state.data, settlement: state.settlement })}</>;
+    return (
+      <motion.div
+        key="unlocked"
+        className="relative"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+      >
+        {/* Layer 1: glow ring pulses twice (behind everything) */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-2 rounded-lg animate-glow-pulse-twice"
+        />
+
+        {/* Layer 2: border light sweep across the unlocked area */}
+        <div aria-hidden className="pointer-events-none animate-border-sweep" />
+
+        {/* Layer 3: 12 emerald particles burst outward */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {PARTICLE_VECTORS.map((v, i) => (
+            <span
+              key={i}
+              className="particle-dot"
+              style={
+                {
+                  top: '50%',
+                  left: '50%',
+                  // The CSS `unlock-particle` keyframe reads these
+                  // to translate to the final position.
+                  '--tx': `${v.tx}px`,
+                  '--ty': `${v.ty}px`,
+                  animationDelay: `${i * 30}ms`,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </div>
+
+        {/* Layer 4: the actual unlocked children, reveal after the sweep */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {children({ node: state.data, settlement: state.settlement })}
+        </motion.div>
+      </motion.div>
+    );
   }
 
   const title = variant === 'prompt' ? 'Premium Reasoning' : 'Output Preview';
@@ -103,73 +170,106 @@ export function DagDrawerUnlock({
 
   return (
     <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 24 }}
         className={cn(
-          'relative overflow-hidden rounded-lg border border-dashed',
-          'border-accent/30 bg-gradient-to-br from-accent/5 via-background/40 to-background/30',
-          'px-3.5 py-3 transition-all duration-300',
+          'relative overflow-hidden rounded-lg p-px',
+          // Gradient border via the existing utility
+          'gradient-border',
         )}
       >
+        {/* Animated hairline at the top edge */}
+        <div aria-hidden className="animate-hairline" />
+
+        {/* Glow blob behind the lock icon */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-8 -top-8 size-24 rounded-full bg-accent/10 blur-2xl"
+          className="pointer-events-none absolute -right-8 -top-8 size-24 rounded-full bg-accent/15 blur-2xl"
         />
 
-        <div className="flex items-start gap-2.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent/30 bg-accent/10 text-accent">
-            <Lock className="size-4 animate-unlock-pulse" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-accent">
-                Premium
-              </span>
-            </div>
-            <h4 className="mt-0.5 text-sm font-medium text-foreground/90">
-              {title}
-            </h4>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-              {subtitle}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3 space-y-2.5">
-          <div className="grid grid-cols-3 gap-2 text-[10px]">
-            <Field icon={<CreditCard className="size-3" />} label="Price">
-              {estimatePrice(node.nodeName)} USDC
-            </Field>
-            <Field icon={<Wallet className="size-3" />} label="Network">
-              Arc L1
-            </Field>
-            <Field icon={<Zap className="size-3" />} label="Unlock">
-              ~ instant
-            </Field>
-          </div>
-          {wallet.isConnected ? (
-            <DialogTrigger asChild>
-              <Button
-                type="button"
-                size="sm"
-                className="w-full rounded-full"
-              >
-                <Lock className="size-3.5 mr-1.5" />
-                Unlock Reasoning
-              </Button>
-            </DialogTrigger>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              className="w-full rounded-full"
-              onClick={wallet.openConnectModal}
+        <div className="rounded-[calc(var(--radius-lg)-1px)] bg-gradient-to-br from-accent/5 via-background/40 to-background/30 px-3.5 py-3">
+          <div className="flex items-start gap-2.5">
+            <motion.div
+              whileHover={{ scale: 1.06 }}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent/30 bg-accent/10 text-accent"
             >
-              <Wallet className="size-3.5 mr-1.5" />
-              Connect Wallet
-            </Button>
-          )}
+              <Lock className="size-4 animate-unlock-pulse" />
+            </motion.div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-accent">
+                  Premium
+                </span>
+              </div>
+              <h4 className="mt-0.5 text-sm font-medium text-foreground/90">
+                {title}
+              </h4>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                {subtitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-2.5">
+            <div className="grid grid-cols-3 gap-2 text-[10px]">
+              <UnlockField
+                icon={<CreditCard className="size-3" />}
+                label="Price"
+              >
+                {estimatePrice(node.nodeName)} USDC
+              </UnlockField>
+              <UnlockField
+                icon={<Wallet className="size-3" />}
+                label="Network"
+              >
+                Arc L1
+              </UnlockField>
+              <UnlockField
+                icon={<Zap className="size-3" />}
+                label="Unlock"
+              >
+                ~ instant
+              </UnlockField>
+            </div>
+            {wallet.isConnected ? (
+              <DialogTrigger asChild>
+                <motion.div
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                >
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full rounded-full"
+                  >
+                    <Lock className="size-3.5 mr-1.5" />
+                    Unlock Reasoning
+                  </Button>
+                </motion.div>
+              </DialogTrigger>
+            ) : (
+              <motion.div
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+              >
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full rounded-full"
+                  onClick={wallet.openConnectModal}
+                >
+                  <Wallet className="size-3.5 mr-1.5" />
+                  Connect Wallet
+                </Button>
+              </motion.div>
+            )}
+          </div>
         </div>
-      </div>
+      </motion.div>
 
       <PaymentModal
         open={paymentOpen}
@@ -191,7 +291,7 @@ export function DagDrawerUnlock({
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function Field({
+function UnlockField({
   icon,
   label,
   children,
@@ -201,7 +301,11 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-md border border-border/50 bg-background/30 px-2 py-1.5">
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+      className="rounded-md border border-border/50 bg-background/30 px-2 py-1.5 cursor-default"
+    >
       <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider text-muted-foreground/70">
         {icon}
         {label}
@@ -209,7 +313,7 @@ function Field({
       <div className="mt-0.5 truncate text-foreground/80 font-mono">
         {children}
       </div>
-    </div>
+    </motion.div>
   );
 }
 

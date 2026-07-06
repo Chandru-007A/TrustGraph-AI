@@ -41,6 +41,35 @@ export function getDisplayLabel(nodeName: string): string {
   return nodeName.endsWith('Node') ? nodeName.slice(0, -4) : nodeName;
 }
 
+// ── Stage icon helper (string lookup) ───────────────────────────────────
+// Pure additive. The icon map mirrors `components/explainability/explain-timeline.tsx`
+// so the visual vocabulary is consistent across the app. Returned as a
+// string the caller resolves with a small `Icon` switch — keeps this
+// file free of React + lucide imports (safe for server components).
+export type StageIconKey =
+  | 'plan'
+  | 'research'
+  | 'validate'
+  | 'reason'
+  | 'evidence'
+  | 'hash'
+  | 'blockchain'
+  | 'completed'
+  | 'generic';
+
+export function getStageIconKey(nodeName: string): StageIconKey {
+  const l = nodeName.toLowerCase();
+  if (l.includes('plan')) return 'plan';
+  if (l.includes('research') || l.includes('retriev')) return 'research';
+  if (l.includes('source') || l.includes('validat')) return 'validate';
+  if (l.includes('reason') || l.includes('think')) return 'reason';
+  if (l.includes('evidence') || l.includes('aggregat')) return 'evidence';
+  if (l.includes('hash') || l.includes('merkle') || l.includes('record')) return 'hash';
+  if (l.includes('blockchain') || l.includes('receipt')) return 'blockchain';
+  if (l.includes('payment') || l.includes('completed')) return 'completed';
+  return 'generic';
+}
+
 // ── Display status (the 4 states the timeline UI cares about) ──────────
 export type DisplayStatus = 'waiting' | 'running' | 'completed' | 'failed';
 

@@ -327,6 +327,25 @@ export class X402Client {
       });
     } catch (err) {
       const e = err as AxiosErrorWithResponse;
+      // If the global response interceptor ran (e.g. it tried a 401
+      // refresh and the refresh ultimately rejected), `e.response` is
+      // still populated with the original server response. Surface
+      // the real status + body so the user sees the actual cause
+      // (e.g. "Token has expired") instead of a generic "Network
+      // Error" mask. We only fall through to `'network'` when there
+      // truly was no response — connection refused, CORS, etc.
+      if (e?.response) {
+        const status = e.response.status;
+        const body = e.response.data as
+          | { error?: string; message?: string }
+          | undefined;
+        return {
+          status: status === 401 ? 'signature_rejected' : 'failed',
+          message:
+            body?.error ?? body?.message ?? `HTTP ${status} after settlement`,
+          settlement: null,
+        };
+      }
       return {
         status: 'network',
         message: e?.message ?? 'Network error while settling payment',

@@ -258,4 +258,125 @@
     pointer-events: none;
     z-index: 1;
   }
+
+  /* ── Cinematic DAG viewer — ambient drift ─────────────────── */
+  @keyframes aurora-drift {
+    0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+    50%      { transform: translate3d(2%, -1.5%, 0) rotate(2deg); }
+  }
+  .animate-aurora { animation: aurora-drift 24s ease-in-out infinite; }
+
+  @keyframes orb-drift-a {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50%      { transform: translate(40px, -30px) scale(1.08); }
+  }
+  @keyframes orb-drift-b {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50%      { transform: translate(-50px, 40px) scale(1.12); }
+  }
+  .animate-orb-a { animation: orb-drift-a 18s ease-in-out infinite; }
+  .animate-orb-b { animation: orb-drift-b 22s ease-in-out infinite; }
+
+  /* ── Edge particles (SMIL keyTimes drive offset-distance) ─ */
+  @keyframes edge-particle {
+    0%   { offset-distance: 0%;   opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { offset-distance: 100%; opacity: 0; }
+  }
+  .animate-edge-particle {
+    offset-rotate: 0deg;
+    animation: edge-particle 1.6s linear infinite;
+  }
+
+  /* ── Node status ambience ─────────────────────────────────── */
+  @keyframes node-pulse-running {
+    0%, 100% {
+      box-shadow:
+        0 0 0 0 oklch(0.7 0.13 232 / 0),
+        0 0 0 1px oklch(0.7 0.13 232 / 0.35);
+    }
+    50% {
+      box-shadow:
+        0 0 0 6px oklch(0.7 0.13 232 / 0.12),
+        0 0 24px 4px oklch(0.7 0.13 232 / 0.25);
+    }
+  }
+  .animate-node-running { animation: node-pulse-running 2.2s ease-in-out infinite; }
+
+  @keyframes node-glow-completed {
+    0%, 100% { box-shadow: 0 0 0 0 oklch(0.78 0.15 168 / 0); }
+    50%      { box-shadow: 0 0 18px 2px oklch(0.78 0.15 168 / 0.30); }
+  }
+  .animate-node-completed { animation: node-glow-completed 3.2s ease-in-out infinite; }
+
+  @keyframes node-shadow-failed {
+    0%, 100% { box-shadow: 0 0 0 0 oklch(0.62 0.2 20 / 0); }
+    50%      { box-shadow: 0 0 18px 2px oklch(0.62 0.2 20 / 0.30); }
+  }
+  .animate-node-failed { animation: node-shadow-failed 2.4s ease-in-out infinite; }
+
+  /* ── Drawer stage-projection + unlock sequence ───────────── */
+  @keyframes border-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .animate-border-sweep {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+  }
+  .animate-border-sweep::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      oklch(0.78 0.15 168 / 0.35) 50%,
+      transparent 100%
+    );
+    animation: border-sweep 0.9s ease-out forwards;
+  }
+
+  @keyframes unlock-particle {
+    0%   { transform: translate(0, 0) scale(0.3); opacity: 1; }
+    100% { transform: translate(var(--tx, 40px), var(--ty, -40px)) scale(0); opacity: 0; }
+  }
+  .particle-dot {
+    position: absolute;
+    width: 6px; height: 6px; border-radius: 9999px;
+    background: oklch(0.78 0.15 168);
+    box-shadow: 0 0 10px 1px oklch(0.78 0.15 168 / 0.85);
+    animation: unlock-particle 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  @keyframes glow-pulse-twice {
+    0%, 100% { box-shadow: 0 0 0 0 oklch(0.78 0.15 168 / 0); }
+    50%      { box-shadow: 0 0 0 8px oklch(0.78 0.15 168 / 0.18); }
+  }
+  .animate-glow-pulse-twice { animation: glow-pulse-twice 0.7s ease-out 2; }
+
+  /* ── Hairline shimmer for locked cards ──────────────────── */
+  @keyframes hairline-shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .animate-hairline {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      oklch(0.7 0.13 232 / 0.55),
+      oklch(0.78 0.15 168 / 0.55),
+      transparent
+    );
+    animation: hairline-shimmer 2.6s linear infinite;
+  }
+
+  /* ── Drawer progress bar (per-node) ─────────────────────── */
+  @keyframes progress-flow {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
+  .animate-progress-flow { animation: progress-flow 1.4s linear infinite; }
 }
