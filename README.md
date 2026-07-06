@@ -287,7 +287,7 @@ Contributions are welcome! Please open an issue or pull request, and check `CONT
 
 ## 📬 Contact
 
-- **GitHub:** [github.com/yourorg/trustgraph-ai](https://github.com/yourorg/trustgraph-ai)
+- **GitHub:** [github.com/Chandru-007A/TrustGraph-AI](https://github.com/Chandru-007A/TrustGraph-AI)
 - **Docs:** `README.md` · `API_REFERENCE.md` · `DEPLOYMENT_GUIDE.md`
 - **Email:** contact@trustgraph-ai.org
 
